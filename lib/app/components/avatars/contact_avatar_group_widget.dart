@@ -3,6 +3,7 @@ import 'dart:ui';
 
 import 'package:bluebubbles/app/components/avatars/contact_avatar_widget.dart';
 import 'package:bluebubbles/app/state/chat_state_scope.dart';
+import 'package:bluebubbles/app/state/handle_state.dart';
 import 'package:bluebubbles/app/wrappers/theme_switcher.dart';
 import 'package:bluebubbles/database/models.dart';
 import 'package:bluebubbles/helpers/helpers.dart';
@@ -55,7 +56,13 @@ class ContactAvatarGroupWidget extends StatelessWidget {
     ],
   };
 
+  /// Sort by "has avatar" first.  Reads `contactsV2.firstOrNull?.avatarPath`
+  /// which lazy-loads a ToMany backlink — triggers a DB query per handle.
+  /// Skip the sort entirely for the single-participant case (DMs, which are
+  /// the bulk of tiles in a typical chat list) so scroll doesn't pay for
+  /// per-tile DB work.
   List<Handle> _sortedHandles(List<Handle> handles) {
+    if (handles.length <= 1) return handles;
     final sorted = List<Handle>.from(handles);
     sorted.sort((a, b) {
       final avatarA = a.contactsV2.firstOrNull?.avatarPath != null;
@@ -65,6 +72,21 @@ class ContactAvatarGroupWidget extends StatelessWidget {
       return 0;
     });
     return sorted;
+  }
+
+  /// Variant that uses HandleState's already-cached avatarPath observable,
+  /// avoiding the per-handle DB query in the reactive path.
+  List<Handle> _sortedHandlesFromStates(List<HandleState> states) {
+    if (states.length <= 1) return states.map((hs) => hs.handle).toList();
+    final sorted = List<HandleState>.from(states);
+    sorted.sort((a, b) {
+      final avatarA = a.avatarPath.value != null;
+      final avatarB = b.avatarPath.value != null;
+      if (!avatarA && avatarB) return 1;
+      if (avatarA && !avatarB) return -1;
+      return 0;
+    });
+    return sorted.map((hs) => hs.handle).toList();
   }
 
   @override
@@ -77,7 +99,7 @@ class ContactAvatarGroupWidget extends StatelessWidget {
 
       if (chatState != null) {
         // Reactive path: observables tracked by Obx — rebuilds on participant or avatar changes.
-        participants = _sortedHandles(chatState.participants.map((hs) => hs.handle).toList());
+        participants = _sortedHandlesFromStates(chatState.participants.toList());
         customAvatarPath = chatState.customAvatarPath.value;
       } else {
         // Static path: read once from the chat param — no subscription created.

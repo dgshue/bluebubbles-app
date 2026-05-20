@@ -42,6 +42,14 @@ class MessagesService extends GetxController {
   bool messagesLoaded = false;
   String? method;
 
+  /// In-flight loadChunk(0, ...) future.  Set when the initial chunk starts
+  /// loading and cleared after it finishes.  Concurrent callers await this
+  /// instead of starting their own parallel fetch — fixes the case where two
+  /// MessagesView initStates race and both pass the !messagesLoaded check
+  /// before either has flipped the flag (was producing 2-3x of the heavy
+  /// initial-load work per chat open).
+  Future<bool>? _initialLoadInFlight;
+
   /// Map of message states for granular reactivity
   /// Key is message GUID, value is MessageState
   /// Provides O(1) lookups and granular observable fields
@@ -1378,6 +1386,24 @@ class MessagesService extends GetxController {
   }
 
   Future<bool> loadChunk(int offset, ConversationViewController controller, {int limit = 25}) async {
+    // De-duplicate concurrent first-chunk loads.  The callsite at
+    // messages_view.dart:147 guards on `service.messagesLoaded`, but that
+    // flag isn't set until the END of this method, so two MessagesView
+    // initStates racing (split-view rebuild, navigation churn) both pass
+    // the check and both run the full heavy load — wasted work that
+    // multiplied the perceived chat-open time.  Share the in-flight future.
+    if (offset == 0 && _initialLoadInFlight != null) {
+      return _initialLoadInFlight!;
+    }
+    if (offset == 0) {
+      _initialLoadInFlight = _loadChunkImpl(offset, controller, limit: limit)
+          .whenComplete(() => _initialLoadInFlight = null);
+      return _initialLoadInFlight!;
+    }
+    return _loadChunkImpl(offset, controller, limit: limit);
+  }
+
+  Future<bool> _loadChunkImpl(int offset, ConversationViewController controller, {int limit = 25}) async {
     List<Message> _messages = [];
 
     // Adjust offset because reactions _are_ messages. We just separate them out in the struct.
