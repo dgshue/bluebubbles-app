@@ -34,6 +34,16 @@ class ContactServiceV2 {
   void Function(void)? _contactChangeListener;
   StreamSubscription<void>? _contactChangeSubscription;
 
+  /// Periodic poller for desktop/web platforms that don't have a native
+  /// "contacts changed" event.  On mobile, fc.FlutterContacts.onDatabaseChange
+  /// fires when the OS contact DB mutates; on Windows/macOS-desktop/Linux/web
+  /// no such event exists, so freshly added contacts on the user's phone
+  /// (synced via iCloud → Mac Contacts.app → BlueBubbles server) never reach
+  /// the client until restart.  This timer pulls the server contact list
+  /// at a modest cadence to keep handles in sync.
+  Timer? _desktopRefreshTimer;
+  static const Duration _desktopRefreshInterval = Duration(minutes: 5);
+
   bool get hasContactAccessSync {
     return _hasContactAccess;
   }
@@ -88,6 +98,18 @@ class ContactServiceV2 {
       if (!kIsDesktop && !kIsWeb) {
         _contactChangeListener = (_) => syncContactsToHandles(wait: false);
         _contactChangeSubscription = fc.FlutterContacts.onDatabaseChange.listen(_contactChangeListener!);
+      } else {
+        // Desktop/web have no native "contacts changed" event.  Poll the
+        // server periodically so newly added contacts (via iCloud → Mac
+        // Contacts.app) reach the client without an app restart.
+        // Skip cycles while the window is unfocused to avoid burning
+        // network for a user who isn't even looking at the app.
+        _desktopRefreshTimer?.cancel();
+        _desktopRefreshTimer = Timer.periodic(_desktopRefreshInterval, (_) {
+          if (!GetIt.I.isRegistered<LifecycleService>()) return;
+          if (kIsDesktop && !LifecycleSvc.windowFocused) return;
+          syncContactsToHandles(wait: false);
+        });
       }
     } else {
       Logger.info('[ContactServiceV2] Headless mode, skipping contact sync opeerations');
@@ -350,5 +372,7 @@ class ContactServiceV2 {
       _contactChangeSubscription?.cancel();
       _contactChangeListener = null;
     }
+    _desktopRefreshTimer?.cancel();
+    _desktopRefreshTimer = null;
   }
 }
