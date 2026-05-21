@@ -35,7 +35,11 @@ class ContactAvatarWidget extends StatefulWidget {
 }
 
 class _ContactAvatarWidgetState extends State<ContactAvatarWidget> with ThemeHelpers {
-  ContactV2? get contactV2 => widget.contact ?? widget.handle?.contactsV2.firstOrNull;
+  // Cached once at initState; the getter version was triggering a ToMany
+  // backlink DB query (`widget.handle?.contactsV2.firstOrNull`) on every
+  // Obx rebuild, which is hot during chat-list scroll.
+  ContactV2? _cachedContactV2;
+  ContactV2? get contactV2 => _cachedContactV2;
   late final String keyPrefix = widget.handle?.address ?? randomString(8);
 
   HandleState? _handleState;
@@ -46,6 +50,7 @@ class _ContactAvatarWidgetState extends State<ContactAvatarWidget> with ThemeHel
     if (widget.handle?.id != null) {
       _handleState = HandleSvc.getOrCreateHandleState(widget.handle!);
     }
+    _cachedContactV2 = widget.contact ?? widget.handle?.contactsV2.firstOrNull;
   }
 
   @override
@@ -53,6 +58,9 @@ class _ContactAvatarWidgetState extends State<ContactAvatarWidget> with ThemeHel
     super.didUpdateWidget(oldWidget);
     if (oldWidget.handle?.id != widget.handle?.id) {
       _handleState = widget.handle?.id != null ? HandleSvc.getOrCreateHandleState(widget.handle!) : null;
+      _cachedContactV2 = widget.contact ?? widget.handle?.contactsV2.firstOrNull;
+    } else if (oldWidget.contact != widget.contact) {
+      _cachedContactV2 = widget.contact ?? widget.handle?.contactsV2.firstOrNull;
     }
   }
 

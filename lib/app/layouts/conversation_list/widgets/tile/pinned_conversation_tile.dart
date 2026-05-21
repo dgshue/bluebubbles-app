@@ -434,8 +434,13 @@ class _ReactionIconState extends CustomState<ReactionIcon, void, ConversationTil
   @override
   Widget build(BuildContext context) {
     return Obx(() {
-      final unread = ChatsSvc.getChatState(controller.chat.guid)?.hasUnreadMessage.value ?? false;
-      final latestMsg = controller.chat.latestMessage;
+      final chatState = ChatsSvc.getChatState(controller.chat.guid);
+      final unread = chatState?.hasUnreadMessage.value ?? false;
+      // Prefer the ChatState's reactive latestMessage observable.  The fallback
+      // through controller.chat.latestMessage triggers Chat.dbLatestMessage,
+      // which runs a synchronous Chat.getMessages query on every rebuild —
+      // hot during scroll/repaint of the pinned tiles row.
+      final latestMsg = chatState?.latestMessage.value ?? controller.chat.latestMessage;
       final isReaction = !isNullOrEmpty(latestMsg.associatedMessageGuid);
       // Null-safe isFromMe: treat null as "from me" so we don't show the icon
       // for messages with unknown sender, mirroring the text-bubble behaviour.
