@@ -97,6 +97,57 @@ class ChatsService {
     return sortedChats[index];
   }
 
+  /// Address keys (lower-cased, unformatted) of DM chats that currently have
+  /// at least one persisted message.  Built lazily via [_dmAddressesWithMessages]
+  /// and refreshed by [_invalidateDmDedupeCache] whenever a chat is added,
+  /// removed, or its latestMessage updates.  Used to suppress duplicate empty
+  /// DM tiles (e.g. an empty RCS;-;+15555555555 chat when an iMessage;-;+15555555555
+  /// chat exists with messages).
+  Set<String>? _cachedDmAddressesWithMessages;
+
+  Set<String> _dmAddressesWithMessages() {
+    final cached = _cachedDmAddressesWithMessages;
+    if (cached != null) return cached;
+    final addrs = <String>{};
+    for (final c in _sortedChats) {
+      if (c.isGroup) continue;
+      // Single-participant DM
+      if (c.handles.length != 1) continue;
+      final addr = c.handles.first.address.trim().toLowerCase();
+      if (addr.isEmpty) continue;
+      // Only count chats that have at least one real message.  The dummy
+      // fallback message returned by dbLatestMessage uses epoch as the date.
+      final lm = chatStates[c.guid]?.latestMessage.value ?? c.latestMessage;
+      final ts = lm.dateCreated?.millisecondsSinceEpoch ?? 0;
+      if (ts > 0) addrs.add(addr);
+    }
+    _cachedDmAddressesWithMessages = addrs;
+    return addrs;
+  }
+
+  void _invalidateDmDedupeCache() {
+    _cachedDmAddressesWithMessages = null;
+  }
+
+  /// True if this DM tile is a stale empty duplicate of another DM (different
+  /// service) that has real messages.  Caller-side filtering only — the chat
+  /// remains in the DB and will reappear immediately once it gets a message.
+  bool _isDuplicateEmptyDm(Chat c) {
+    if (c.isGroup) return false;
+    if (c.handles.length != 1) return false;
+    // Never hide the chat that is currently open, otherwise the tile rips
+    // out from under the user while they're looking at it.
+    if (activeChat?.chat.guid == c.guid) return false;
+    final addr = c.handles.first.address.trim().toLowerCase();
+    if (addr.isEmpty) return false;
+    final lm = chatStates[c.guid]?.latestMessage.value ?? c.latestMessage;
+    final ts = lm.dateCreated?.millisecondsSinceEpoch ?? 0;
+    // Has its own messages → keep it
+    if (ts > 0) return false;
+    // Empty, but no other DM for the same address → keep it (user expects to see something)
+    return _dmAddressesWithMessages().contains(addr);
+  }
+
   /// Get filtered chats (archived, unknown senders, pinned)
   List<Chat> getFilteredChats({
     bool? showArchived,
@@ -104,7 +155,10 @@ class ChatsService {
     bool? pinnedOnly,
     bool? excludePinned,
   }) {
-    var chats = allChats;
+    // Always hide empty DM tiles that duplicate a non-empty DM for the same
+    // address.  E.g. an empty RCS;-;+15555555555 chat when an
+    // iMessage;-;+15555555555 chat exists with real messages.
+    var chats = allChats.where((c) => !_isDuplicateEmptyDm(c)).toList();
 
     // Apply archived filter
     if (showArchived != null) {
@@ -399,6 +453,10 @@ class ChatsService {
   /// only the last one will trigger a UI rebuild
   /// If [immediate] is true, bypasses debouncing and updates immediately (for new messages)
   void _scheduleListVersionUpdate({bool immediate = false}) {
+    // Anything that bumps chatListVersion may also change which addresses
+    // have a non-empty DM (chat insert, reposition, new latest message, etc.)
+    // so always recompute the dedupe set on the next read.
+    _invalidateDmDedupeCache();
     if (immediate) {
       _listVersionUpdateTimer?.cancel();
       chatListVersion.value++;
