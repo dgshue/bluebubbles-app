@@ -808,7 +808,37 @@ class MessagesService extends GetxController {
       toUpdate = struct.getMessage(oldGuid);
     }
     toUpdate ??= struct.getMessage(updated.guid!);
-    if (toUpdate == null) return;
+    if (toUpdate == null) {
+      // Race fallback: neither oldGuid nor updated.guid is in the in-memory
+      // struct. This happens when OutgoingMessageHandler._matchMessageWithExisting
+      // races with the socket-driven updated-message pipeline — by the time this
+      // call lands, the temp record was already renamed elsewhere and the new
+      // record hasn't been threaded back through here. Without this branch the
+      // bubble silently vanishes from the UI even though the DB row is correct.
+      if (updated.guid == null) return;
+      Logger.warn(
+        'updateMessage: neither oldGuid=$oldGuid nor updated.guid=${updated.guid} '
+        'present in struct — adding as new (race fallback)',
+        tag: 'MessagesService',
+      );
+      struct.addMessages([updated]);
+      final existing = messageStates[updated.guid!];
+      if (existing != null) {
+        existing.updateFromMessage(updated);
+      } else {
+        final state = MessageState(updated);
+        state.onInit();
+        messageStates[updated.guid!] = state;
+      }
+      if (oldGuid != null && oldGuid != updated.guid) {
+        messageStates.remove(oldGuid);
+        _renameIndicatorTracking(oldGuid, updated.guid!);
+      }
+      messageUpdateTrigger[updated.guid!] = DateTime.now().millisecondsSinceEpoch;
+      _updateIndicatorsForMessage(updated);
+      updateFunc.call(updated, oldGuid: oldGuid);
+      return;
+    }
 
     // Preserve error fields before merging — Message.merge unconditionally
     // copies newMessage.error onto existing.error when they differ, but here
