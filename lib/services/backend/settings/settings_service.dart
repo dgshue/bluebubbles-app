@@ -48,10 +48,10 @@ class SettingsService {
     settings = Settings.getSettings();
     // Populate server details from prefs so sync getters are usable immediately.
     _serverDetails.value = ServerDetails(
-      macOSVersion: PrefsSvc.i.getInt("macos-version") ?? 11,
-      macOSMinorVersion: PrefsSvc.i.getInt("macos-minor-version") ?? 0,
-      serverVersion: PrefsSvc.i.getString("server-version") ?? "0.0.0",
-      serverVersionCode: PrefsSvc.i.getInt("server-version-code") ?? 0,
+      macOSVersion: PrefsSvc.server.getMacOSVersion() ?? 11,
+      macOSMinorVersion: PrefsSvc.server.getMacOSMinorVersion() ?? 0,
+      serverVersion: PrefsSvc.server.getServerVersion() ?? "0.0.0",
+      serverVersionCode: PrefsSvc.server.getServerVersionCode() ?? 0,
     );
 
     if (!headless && !kIsWeb && !kIsDesktop) {
@@ -85,8 +85,8 @@ class SettingsService {
             _canAuthenticate = await LocalAuthentication().isDeviceSupported();
           } catch (_) {}
         }
-        SettingsSvc.settings.launchAtStartup.value = await setupLaunchAtStartup(
-            SettingsSvc.settings.launchAtStartup.value, SettingsSvc.settings.launchAtStartupMinimized.value);
+        settings.launchAtStartup.value =
+            await setupLaunchAtStartup(settings.launchAtStartup.value, settings.launchAtStartupMinimized.value);
       });
     }
 
@@ -96,46 +96,13 @@ class SettingsService {
   /// Returns true if LaunchAtStartup is enabled and false if it is disabled
   Future<bool> setupLaunchAtStartup(bool launchAtStartup, bool minimized) async {
     // Can't use fs here because it hasn't been initialized yet
-    if (!isMsix) {
-      LaunchAtStartup.setup((await PackageInfo.fromPlatform()).appName, minimized);
-      if (launchAtStartup) {
-        await LaunchAtStartup.enable();
-        return true;
-      }
-      await LaunchAtStartup.disable();
-      return false;
-    } else if (launchAtStartup) {
-      /// Copied from https://github.com/Merrit/nyrna/pull/172/files
-      /// Custom because LaunchAtStartup's implementation doesn't support args yet.
-      String script = '''
-        \$TargetPath = "shell:AppsFolder\\$windowsAppPackageName"
-        \$ShortcutFile = "\$env:USERPROFILE\\Start Menu\\Programs\\Startup\\$appName.lnk"
-        \$WScriptShell = New-Object -ComObject WScript.Shell
-        \$Shortcut = \$WScriptShell.CreateShortcut(\$ShortcutFile)
-        \$Shortcut.TargetPath = \$TargetPath
-        \$Shortcut.Arguments = "${minimized ? 'minimized' : ''}"
-        \$Shortcut.Save()
-        ''';
-      await Process.run(
-        'powershell',
-        ['-Command', script],
-      );
-    } else {
-      const String script = '''
-        Remove-Item -Path "\$env:USERPROFILE\\Start Menu\\Programs\\Startup\\$appName.lnk"
-      ''';
-      await Process.run(
-        'powershell',
-        ['-Command', script],
-      );
+    LaunchAtStartup.setup((await PackageInfo.fromPlatform()).appName, minimized);
+    if (launchAtStartup) {
+      await LaunchAtStartup.enable();
+      return true;
     }
-    final createdShortcut = File(
-      '${Platform.environment['USERPROFILE']}\\Start Menu\\Programs\\Startup\\$appName.lnk',
-    );
-    if (!createdShortcut.existsSync()) {
-      return false;
-    }
-    return true;
+    await LaunchAtStartup.disable();
+    return false;
   }
 
   void loadFcmDataFromDatabase() {
@@ -157,7 +124,7 @@ class SettingsService {
   }
 
   Future<Map<String, dynamic>> getServerDetailsDict() async {
-    final response = await HttpSvc.serverInfo();
+    final response = await HttpSvc.server.info();
     if (response.statusCode == 200) {
       final List<String> toSave = [];
       if (settings.iCloudAccount.isEmpty && response.data['data']['detected_icloud'] is String) {
@@ -175,10 +142,12 @@ class SettingsService {
       final serverVersion = response.data['data']['server_version'];
       final code = Version.parse(serverVersion ?? "0.0.0");
       final versionCode = code.major * 100 + code.minor * 21 + code.patch;
-      if (version != null) await PrefsSvc.i.setInt("macos-version", version);
-      if (minorVersion != null) await PrefsSvc.i.setInt("macos-minor-version", minorVersion);
-      if (serverVersion != null) await PrefsSvc.i.setString("server-version", serverVersion);
-      await PrefsSvc.i.setInt("server-version-code", versionCode);
+      await PrefsSvc.server.setServerDetails(
+        macOSVersion: version,
+        macOSMinorVersion: minorVersion,
+        serverVersion: serverVersion,
+        serverVersionCode: versionCode,
+      );
 
       if (toSave.isNotEmpty) {
         await settings.saveManyAsync(toSave);
@@ -193,7 +162,7 @@ class SettingsService {
             settings.reachedConversationList.value &&
             !settings.enablePrivateAPI.value &&
             settings.serverPrivateAPI.value == true &&
-            PrefsSvc.i.getBool('private-api-enable-tip') != true,
+            !PrefsSvc.server.hasSeenPrivateApiEnableTip(),
       };
     }
 
@@ -235,12 +204,12 @@ class SettingsService {
       final details = await ServerInterface.getServerDetails();
       _serverDetails.value = details;
 
-      await Future.wait([
-        PrefsSvc.i.setInt("macos-version", details.macOSVersion),
-        PrefsSvc.i.setInt("macos-minor-version", details.macOSMinorVersion),
-        PrefsSvc.i.setString("server-version", details.serverVersion),
-        PrefsSvc.i.setInt("server-version-code", details.serverVersionCode),
-      ]);
+      await PrefsSvc.server.setServerDetails(
+        macOSVersion: details.macOSVersion,
+        macOSMinorVersion: details.macOSMinorVersion,
+        serverVersion: details.serverVersion,
+        serverVersionCode: details.serverVersionCode,
+      );
     } catch (e, s) {
       Logger.warn("Failed to refresh server details", error: e, trace: s, tag: 'SettingsService');
     }
@@ -307,12 +276,12 @@ class SettingsService {
                     alignment: Alignment.center,
                     child: ElevatedButton(
                       onPressed: () async {
-                        await PrefsSvc.i.setBool('private-api-enable-tip', true);
+                        await PrefsSvc.server.markPrivateApiEnableTipShown();
                         if (!context.mounted) return;
                         Navigator.of(context).pop();
                         NavigationSvc.closeSettings(context);
                         NavigationSvc.closeAllConversationView(context);
-                        await ChatsSvc.setAllInactive();
+                        ChatsSvc.setAllInactive();
                         await Navigator.of(Get.context!).push(
                           ThemeSwitcher.buildPageRoute(
                             builder: (BuildContext context) {
@@ -339,7 +308,7 @@ class SettingsService {
                     alignment: Alignment.center,
                     child: TextButton(
                       onPressed: () async {
-                        await PrefsSvc.i.setBool('private-api-enable-tip', true);
+                        await PrefsSvc.server.markPrivateApiEnableTipShown();
                         if (!context.mounted) return;
                         Navigator.of(context).pop();
                       },
@@ -373,7 +342,7 @@ class SettingsService {
   }
 
   Future<Map<String, dynamic>> getServerUpdateDict() async {
-    final response = await HttpSvc.checkUpdate();
+    final response = await HttpSvc.server.checkUpdate();
     if (response.statusCode == 200) {
       bool available = response.data['data']['available'] ?? false;
       Map<String, dynamic> metadata = response.data['data']['metadata'] ?? {};
@@ -411,7 +380,7 @@ class SettingsService {
     }
 
     if (!updateInfo.available ||
-        (updateInfo.version != null && PrefsSvc.i.getString("server-update-check") == updateInfo.version)) {
+        (updateInfo.version != null && PrefsSvc.server.getServerUpdateCheckVersion() == updateInfo.version)) {
       return;
     }
 
@@ -444,7 +413,7 @@ class SettingsService {
                 style: context.theme.textTheme.bodyLarge!.copyWith(color: context.theme.colorScheme.primary)),
             onPressed: () async {
               if (updateInfo.version != null) {
-                await PrefsSvc.i.setString("server-update-check", updateInfo.version!);
+                await PrefsSvc.server.setServerUpdateCheckVersion(updateInfo.version!);
               }
               Navigator.of(context).pop();
             },
@@ -454,9 +423,9 @@ class SettingsService {
                 style: context.theme.textTheme.bodyLarge!.copyWith(color: context.theme.colorScheme.primary)),
             onPressed: () async {
               if (updateInfo.version != null) {
-                await PrefsSvc.i.setString("server-update-check", updateInfo.version!);
+                await PrefsSvc.server.setServerUpdateCheckVersion(updateInfo.version!);
               }
-              HttpSvc.installUpdate();
+              HttpSvc.server.installUpdate();
               Navigator.of(context).pop();
             },
           ),
@@ -487,7 +456,7 @@ class SettingsService {
       buildNumber =
           FilesystemSvc.packageInfo.buildNumber.lastChars(min(4, FilesystemSvc.packageInfo.buildNumber.length));
       if (int.parse(code) <= int.parse(buildNumber) ||
-          PrefsSvc.i.getString("client-update-check") == code ||
+          PrefsSvc.server.getClientUpdateCheckCode() == code ||
           (Platform.isAndroid && isDesktopRelease)) {
         available = false;
       }
@@ -574,7 +543,7 @@ class SettingsService {
             child: Text("OK",
                 style: context.theme.textTheme.bodyLarge!.copyWith(color: context.theme.colorScheme.primary)),
             onPressed: () async {
-              await PrefsSvc.i.setString("client-update-check", updateInfo.code);
+              await PrefsSvc.server.setClientUpdateCheckCode(updateInfo.code);
               Navigator.of(context).pop();
             },
           ),

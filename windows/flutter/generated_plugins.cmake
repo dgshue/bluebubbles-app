@@ -6,6 +6,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   app_links
   bitsdojo_window_windows
   connectivity_plus
+  desktop_drop
   desktop_webview_auth
   dynamic_color
   emoji_picker_flutter
@@ -13,7 +14,6 @@ list(APPEND FLUTTER_PLUGIN_LIST
   flutter_acrylic
   flutter_timezone
   geolocator_windows
-  irondash_engine_context
   local_auth_windows
   local_notifier
   maps_launcher
@@ -27,11 +27,10 @@ list(APPEND FLUTTER_PLUGIN_LIST
   screen_retriever_windows
   secure_application
   share_plus
-  super_native_extensions
+  sqlite3_flutter_libs
   system_tray
   tray_manager
   url_launcher_windows
-  webcrypto
   window_manager
   windows_taskbar
 )

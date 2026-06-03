@@ -1,8 +1,11 @@
+import 'dart:async' show unawaited;
+
 import 'package:bluebubbles/app/state/handle_state.dart';
 import 'package:bluebubbles/database/models.dart';
 import 'package:bluebubbles/helpers/helpers.dart';
 import 'package:bluebubbles/services/services.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart' show ThemeData;
 import 'package:get/get.dart';
 
 /// State wrapper for Chat that provides granular reactivity for UI components.
@@ -34,6 +37,15 @@ class ChatState {
   final RxBool lockChatIcon;
   final RxnString lastReadMessageGuid;
   final Rxn<DateTime> dateDeleted;
+
+  /// Adaptive chat theme — generates per-chat ThemeData from background image colors.
+  final RxBool adaptiveThemeEnabled;
+  final RxnString adaptiveThemeVariantLight;
+  final RxnString adaptiveThemeVariantDark;
+
+  /// Loaded asynchronously by [loadAdaptiveThemes]. Null until generation completes.
+  final Rx<Map<MaterialYouVariant, ({ThemeData light, ThemeData dark})>?> adaptiveThemes =
+      Rx<Map<MaterialYouVariant, ({ThemeData light, ThemeData dark})>?>(null);
 
   /// The delivery/read status of the latest outgoing message.  Updated any
   /// time [updateLatestMessageInternal] is called, even when the GUID has not
@@ -73,10 +85,12 @@ class ChatState {
         chatCreatorSubtitle = RxnString(chat.isGroup
             ? chat.getChatCreatorSubtitle()
             : (chat.handles.isNotEmpty ? (chat.handles.first.formattedAddress ?? chat.handles.first.address) : null)),
-        subtitle = RxnString(chat.latestMessage.getNotificationText()),
-        latestMessage = Rxn<Message>(chat.latestMessage),
+        subtitle = RxnString(chat.dbLatestMessage.target?.getNotificationText()),
+        latestMessage = Rxn<Message>(chat.dbLatestMessage.target),
         latestMessageStatus = Rx<MessageStatusIndicator>(
-          chat.latestMessage.isFromMe != true ? MessageStatusIndicator.NONE : chat.latestMessage.indicatorToShow,
+          chat.dbLatestMessage.target?.isFromMe != true
+              ? MessageStatusIndicator.NONE
+              : (chat.dbLatestMessage.target?.indicatorToShow ?? MessageStatusIndicator.NONE),
         ),
         textFieldText = RxnString(chat.textFieldText),
         textFieldAttachments = chat.textFieldAttachments.obs,
@@ -86,6 +100,9 @@ class ChatState {
         lockChatIcon = chat.lockChatIcon.obs,
         lastReadMessageGuid = RxnString(chat.lastReadMessageGuid),
         dateDeleted = Rxn<DateTime>(chat.dateDeleted),
+        adaptiveThemeEnabled = chat.adaptiveThemeEnabled.obs,
+        adaptiveThemeVariantLight = RxnString(chat.adaptiveThemeVariantLight),
+        adaptiveThemeVariantDark = RxnString(chat.adaptiveThemeVariantDark),
         isActive = false.obs,
         isAlive = false.obs,
         shouldHideAttachments =
@@ -104,6 +121,10 @@ class ChatState {
     // Apply redaction if redacted mode is enabled on initialization
     if (SettingsSvc.settings.redactedMode.value) {
       redactFields();
+    }
+    // Pre-load adaptive themes if the feature is already enabled for this chat.
+    if (chat.adaptiveThemeEnabled && chat.customBackgroundPath != null) {
+      unawaited(loadAdaptiveThemes());
     }
   }
 
@@ -177,7 +198,6 @@ class ChatState {
   void updateDisplayNameInternal(String? value) {
     if (displayName.value != value) {
       displayName.value = value;
-      updateTitleInternal(_computeTitle());
     }
   }
 
@@ -188,8 +208,54 @@ class ChatState {
   }
 
   void updateCustomBackgroundPathInternal(String? value) {
-    if (customBackgroundPath.value != value) {
+    final oldPath = customBackgroundPath.value;
+    if (oldPath != value) {
       customBackgroundPath.value = value;
+      if (adaptiveThemeEnabled.value) {
+        if (oldPath != null) ThemesService.clearAdaptiveThemeCache(oldPath);
+        if (value != null) {
+          unawaited(loadAdaptiveThemes());
+        } else {
+          adaptiveThemes.value = null;
+        }
+      }
+    }
+  }
+
+  void updateAdaptiveThemeEnabledInternal(bool value) {
+    if (adaptiveThemeEnabled.value != value) {
+      adaptiveThemeEnabled.value = value;
+      if (value && customBackgroundPath.value != null) {
+        unawaited(loadAdaptiveThemes());
+      }
+    }
+  }
+
+  void updateAdaptiveThemeVariantLightInternal(String? value) {
+    if (adaptiveThemeVariantLight.value != value) {
+      adaptiveThemeVariantLight.value = value;
+    }
+  }
+
+  void updateAdaptiveThemeVariantDarkInternal(String? value) {
+    if (adaptiveThemeVariantDark.value != value) {
+      adaptiveThemeVariantDark.value = value;
+    }
+  }
+
+  /// Generates all 9 variant ThemeData pairs from the current background image
+  /// and stores the result in [adaptiveThemes]. Auto-selects [MaterialYouVariant.base]
+  /// if no variant has been saved yet.
+  Future<void> loadAdaptiveThemes() async {
+    final path = customBackgroundPath.value;
+    if (path == null) return;
+    final themes = await ThemesService.generateAdaptiveThemesFromImage(path);
+    adaptiveThemes.value = themes;
+    if (adaptiveThemeVariantLight.value == null) {
+      adaptiveThemeVariantLight.value = MaterialYouVariant.base.name;
+    }
+    if (adaptiveThemeVariantDark.value == null) {
+      adaptiveThemeVariantDark.value = MaterialYouVariant.base.name;
     }
   }
 
@@ -213,7 +279,6 @@ class ChatState {
   void updateChatCreatorSubtitleInternal(String? value) {
     if (chatCreatorSubtitle.value != value) {
       chatCreatorSubtitle.value = value;
-      updateTitleInternal(_computeTitle());
     }
   }
 
@@ -298,9 +363,8 @@ class ChatState {
   }
 
   void updateLatestMessageInternal(Message? value) {
-    if (latestMessage.value?.guid != value?.guid) {
-      latestMessage.value = value;
-    }
+    // Don't GUID-guard
+    latestMessage.value = value;
     // Always update status even when the GUID is unchanged — a delivery or
     // read receipt arrives for the same message object, and the indicator
     // must reflect the new state without a full GUID change.
@@ -334,13 +398,17 @@ class ChatState {
     updateDisplayNameInternal(updatedChat.displayName);
     updateCustomAvatarPathInternal(updatedChat.customAvatarPath);
     updateCustomBackgroundPathInternal(updatedChat.customBackgroundPath);
+    updateAdaptiveThemeEnabledInternal(updatedChat.adaptiveThemeEnabled);
+    updateAdaptiveThemeVariantLightInternal(updatedChat.adaptiveThemeVariantLight);
+    updateAdaptiveThemeVariantDarkInternal(updatedChat.adaptiveThemeVariantDark);
     // Rebuild participants from the fresh DB handles on the incoming chat object so
     // we never read the stale cached ToMany on the original ChatState.chat.
     _updateParticipantsInternal(updatedChat.handles.toList());
-    updateLatestMessageInternal(updatedChat.latestMessage);
-    // Refresh the subtitle so it reflects any updated handle display names
+    updateLatestMessageInternal(updatedChat.dbLatestMessage.target);
+    // Refresh the title & subtitle so it reflects any updated handle display names
     // (e.g. a group-event whose sender handle was just added to the DB).
-    updateSubtitleInternal(_computeSubtitle(updatedChat.latestMessage));
+    updateTitleInternal(_computeTitle());
+    updateSubtitleInternal(_computeSubtitle(updatedChat.dbLatestMessage.target));
 
     // NOTE: textFieldText and textFieldAttachments are intentionally NOT synced here.
     // They are purely client-side fields managed exclusively by setChatTextFieldText /
@@ -374,8 +442,6 @@ class ChatState {
     chat.isArchived = updatedChat.isArchived;
     chat.displayName = updatedChat.displayName;
     chat.customAvatarPath = updatedChat.customAvatarPath;
-    chat.latestMessage = updatedChat.latestMessage;
-    // NOTE: textFieldText and textFieldAttachments omitted intentionally — see comment above.
     chat.autoSendReadReceipts = updatedChat.autoSendReadReceipts;
     chat.autoSendTypingIndicators = updatedChat.autoSendTypingIndicators;
     chat.lockChatName = updatedChat.lockChatName;

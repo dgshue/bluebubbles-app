@@ -99,6 +99,16 @@ class _MessageHolderState extends State<MessageHolder> with ThemeHelpers {
   List<RxDouble> replyOffsets = [];
   List<GlobalKey> keys = [];
   final RxBool tapped = false.obs;
+  final Map<int, ValueNotifier<int>> _galleryIndices = {};
+
+  @override
+  void dispose() {
+    for (final notifier in _galleryIndices.values) {
+      notifier.dispose();
+    }
+    super.dispose();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -120,6 +130,47 @@ class _MessageHolderState extends State<MessageHolder> with ThemeHelpers {
       await service.editMessage(message, part, newEdit);
     }
     widget.cvController.lastFocusedNode.requestFocus();
+  }
+
+  List<MessagePart> _collapseImageGalleryParts(List<MessagePart> parts) {
+    if (!iOS) return parts;
+    final collapsed = <MessagePart>[];
+    int i = 0;
+    while (i < parts.length) {
+      final current = parts[i];
+      if (!current.isMediaOnlyPart) {
+        collapsed.add(current);
+        i++;
+        continue;
+      }
+
+      final groupedAttachments = <Attachment>[...current.attachments];
+      final groupedPartIndices = <int>[...List.filled(current.attachments.length, current.part)];
+      int j = i + 1;
+      while (j < parts.length) {
+        final next = parts[j];
+        if (!next.isMediaOnlyPart) break;
+        groupedAttachments.addAll(next.attachments);
+        groupedPartIndices.addAll(List.filled(next.attachments.length, next.part));
+        j++;
+      }
+
+      if (groupedAttachments.length > 1) {
+        collapsed.add(MessagePart(
+          attachments: groupedAttachments,
+          part: current.part,
+          shouldRedact: current.shouldRedact,
+          mentions: const [],
+          edits: const [],
+          isUnsent: current.isUnsent,
+          attachmentPartIndices: groupedPartIndices,
+        ));
+      } else {
+        collapsed.add(current);
+      }
+      i = j;
+    }
+    return collapsed;
   }
 
   @override
@@ -156,10 +207,16 @@ class _MessageHolderState extends State<MessageHolder> with ThemeHelpers {
     return MessageStateScope(
       messageState: messageState,
       child: Obx(() {
+        // Ensure this Obx always has direct reactive dependencies from MessageState.
+        // Some render paths can avoid touching other Rx fields.
+        // ignore: unused_local_variable
+        final _rxGuard = (controller.isSending.value, controller.hasError.value, controller.parts.length);
+
         // Read controller.parts reactively so Obx rebuilds when parts change
-        final messageParts = widget.isReplyThread && widget.replyPart != null
+        final rawMessageParts = widget.isReplyThread && widget.replyPart != null
             ? [controller.parts[widget.replyPart!]]
             : controller.parts.toList();
+        final messageParts = _collapseImageGalleryParts(rawMessageParts);
 
         // Grow per-part arrays so replyOffsets[index] and keys[index] are
         // always safe to access, even when parts are added after initState.
@@ -169,17 +226,14 @@ class _MessageHolderState extends State<MessageHolder> with ThemeHelpers {
         }
 
         // Use MessageState observables for proper reactivity
-        final isTempMessage = controller.isSending.value;
         final isFromMe = controller.message.isFromMe!;
 
         return AnimatedPadding(
           duration: const Duration(milliseconds: 100),
-          padding: isTempMessage
-              ? EdgeInsets.zero
-              : EdgeInsets.only(
-                  top: olderMessage != null && !message.sameSender(olderMessage!) ? 5.0 : 0,
-                  bottom: newerMessage != null && !message.sameSender(newerMessage!) ? 5.0 : 0,
-                ),
+          padding: EdgeInsets.only(
+            top: olderMessage != null && !message.sameSender(olderMessage!) ? 5.0 : 0,
+            bottom: newerMessage != null && !message.sameSender(newerMessage!) ? 5.0 : 0,
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -251,7 +305,7 @@ class _MessageHolderState extends State<MessageHolder> with ThemeHelpers {
                                       padding: showAvatar || alwaysShowAvatars
                                           ? EdgeInsets.only(left: 35.0 * avatarScale)
                                           : EdgeInsets.zero,
-                                      child: iOS && message.threadOriginatorGuid != null
+                                      child: iOS && !widget.isReplyThread && message.threadOriginatorGuid != null
                                           ? SizedBox(
                                               width: double.infinity,
                                               child: CustomPaint(
@@ -265,7 +319,11 @@ class _MessageHolderState extends State<MessageHolder> with ThemeHelpers {
                                           : MessageSender(olderMessage: olderMessage),
                                     ),
                                   // add a box to account for height of reactions
-                                  iOS && message.threadOriginatorGuid != null
+                                  iOS &&
+                                          !widget.isReplyThread &&
+                                          message.threadOriginatorGuid != null &&
+                                          replyTo != null &&
+                                          replyTo!.isFromMe!
                                       ? SizedBox(
                                           width: double.infinity,
                                           child: CustomPaint(
@@ -277,6 +335,7 @@ class _MessageHolderState extends State<MessageHolder> with ThemeHelpers {
                                               messageParts: messageParts,
                                               part: e,
                                               reactionsForPart: reactionsForPart,
+                                              minHeightWhenNoReactions: message.isFromMe! ? 8 : 0,
                                             ),
                                           ),
                                         )
@@ -284,6 +343,12 @@ class _MessageHolderState extends State<MessageHolder> with ThemeHelpers {
                                           messageParts: messageParts,
                                           part: e,
                                           reactionsForPart: reactionsForPart,
+                                          minHeightWhenNoReactions: iOS &&
+                                                  !widget.isReplyThread &&
+                                                  message.threadOriginatorGuid != null &&
+                                                  message.isFromMe!
+                                              ? 8
+                                              : 0,
                                         ),
                                   if (!iOS &&
                                       index == 0 &&
@@ -426,58 +491,75 @@ class _MessageHolderState extends State<MessageHolder> with ThemeHelpers {
                                                                     cvController: widget.cvController,
                                                                     part: e,
                                                                     isEditing: isEditing(e.part),
+                                                                    galleryCurrentIndex: e.isMediaGallery
+                                                                        ? _galleryIndices.putIfAbsent(
+                                                                            e.part, () => ValueNotifier(0))
+                                                                        : null,
                                                                     child: SwipeToReplyWrapper(
                                                                       enabled: canSwipeToReply && !isEditing(e.part),
                                                                       partIndex: index,
                                                                       replyOffset: replyOffsets[index],
                                                                       cvController: widget.cvController,
-                                                                      child: ClipPath(
-                                                                        clipper: TailClipper(
-                                                                          isFromMe: message.isFromMe!,
-                                                                          showTail: message.showTail(newerMessage) &&
-                                                                              e.part == controller.parts.length - 1,
-                                                                          connectLower: iOS
-                                                                              ? false
-                                                                              : (e.part != 0 &&
-                                                                                      e.part !=
-                                                                                          controller.parts.length -
-                                                                                              1) ||
-                                                                                  (e.part == 0 &&
-                                                                                      controller.parts.length > 1),
-                                                                          connectUpper: iOS ? false : e.part != 0,
-                                                                        ),
-                                                                        child: Stack(
-                                                                          alignment: Alignment.centerRight,
-                                                                          children: [
-                                                                            MessagePartContent(
-                                                                              messagePart: e,
+                                                                      child: Builder(
+                                                                        builder: (_) {
+                                                                          final isGallery = iOS && e.isMediaGallery;
+                                                                          final inner = Stack(
+                                                                            alignment: Alignment.centerRight,
+                                                                            children: [
+                                                                              MessagePartContent(
+                                                                                messagePart: e,
+                                                                                galleryCurrentIndexNotifier: e
+                                                                                        .isMediaGallery
+                                                                                    ? _galleryIndices.putIfAbsent(
+                                                                                        e.part, () => ValueNotifier(0))
+                                                                                    : null,
+                                                                              ),
+                                                                              if (message.isFromMe!)
+                                                                                Obx(() {
+                                                                                  final editStuff = widget
+                                                                                      .cvController.editing
+                                                                                      .firstWhereOrNull((e2) =>
+                                                                                          e2.message.guid ==
+                                                                                              message.guid! &&
+                                                                                          e2.part.part == e.part);
+                                                                                  return AnimatedSize(
+                                                                                      duration: const Duration(
+                                                                                          milliseconds: 250),
+                                                                                      alignment: Alignment.centerRight,
+                                                                                      curve: Curves.easeOutBack,
+                                                                                      child: editStuff == null
+                                                                                          ? const SizedBox.shrink()
+                                                                                          : MessageEditField(
+                                                                                              part: e.part,
+                                                                                              editController:
+                                                                                                  editStuff.controller,
+                                                                                              cvController:
+                                                                                                  widget.cvController,
+                                                                                              onComplete: completeEdit,
+                                                                                            ));
+                                                                                }),
+                                                                            ],
+                                                                          );
+                                                                          if (isGallery) return inner;
+                                                                          return ClipPath(
+                                                                            clipper: TailClipper(
+                                                                              isFromMe: message.isFromMe!,
+                                                                              showTail: message
+                                                                                      .showTail(newerMessage) &&
+                                                                                  e.part == controller.parts.length - 1,
+                                                                              connectLower: iOS
+                                                                                  ? false
+                                                                                  : (e.part != 0 &&
+                                                                                          e.part !=
+                                                                                              controller.parts.length -
+                                                                                                  1) ||
+                                                                                      (e.part == 0 &&
+                                                                                          controller.parts.length > 1),
+                                                                              connectUpper: iOS ? false : e.part != 0,
                                                                             ),
-                                                                            if (message.isFromMe!)
-                                                                              Obx(() {
-                                                                                final editStuff = widget
-                                                                                    .cvController.editing
-                                                                                    .firstWhereOrNull((e2) =>
-                                                                                        e2.message.guid ==
-                                                                                            message.guid! &&
-                                                                                        e2.part.part == e.part);
-                                                                                return AnimatedSize(
-                                                                                    duration: const Duration(
-                                                                                        milliseconds: 250),
-                                                                                    alignment: Alignment.centerRight,
-                                                                                    curve: Curves.easeOutBack,
-                                                                                    child: editStuff == null
-                                                                                        ? const SizedBox.shrink()
-                                                                                        : MessageEditField(
-                                                                                            part: e.part,
-                                                                                            editController:
-                                                                                                editStuff.controller,
-                                                                                            cvController:
-                                                                                                widget.cvController,
-                                                                                            onComplete: completeEdit,
-                                                                                          ));
-                                                                              }),
-                                                                          ],
-                                                                        ),
+                                                                            child: inner,
+                                                                          );
+                                                                        },
                                                                       ),
                                                                     ),
                                                                   ),
@@ -569,8 +651,8 @@ class _ReplyLinePainter extends CustomPainter {
     // Position depends on message direction: left side if from me, right side if not
     final x = isFromMe ? 35.0 : size.width - 35;
     canvas.drawLine(
-      Offset(x, 0),
-      Offset(x, size.height),
+      Offset(x, -5),
+      Offset(x, size.height - (!isFromMe ? 0 : 5)),
       paint,
     );
   }

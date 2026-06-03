@@ -4,10 +4,10 @@ import 'dart:io';
 import 'package:bluebubbles/app/state/attachment_state.dart';
 import 'package:bluebubbles/app/state/message_state.dart';
 import 'package:bluebubbles/helpers/types/extensions/extensions.dart';
-import 'package:bluebubbles/helpers/types/helpers/message_helper.dart';
 import 'package:bluebubbles/helpers/types/constants.dart';
 import 'package:bluebubbles/database/models.dart';
 import 'package:bluebubbles/services/services.dart';
+import 'package:bluebubbles/services/backend/interfaces/sync_interface.dart';
 import 'package:bluebubbles/utils/logger/logger.dart';
 import 'package:collection/collection.dart';
 import 'package:dio/dio.dart';
@@ -1234,12 +1234,45 @@ class MessagesService extends GetxController {
         ),
       );
     }
+
+    // The retried message always gets dateCreated = now, making it the newest
+    // message in the chat regardless of what was previously the latest.
+    // Always update the chat's latest message, subtitle, and sort position.
+    ChatsSvc.updateChatLatestMessage(tag, message);
   }
 
-  /// Delete a message from DB, struct, and MessageState
+  /// Delete a message from DB, struct, and MessageState.
+  /// If the deleted message was the chat's latest, updates the chat's latest message
+  /// in both the database and reactive state.
   Future<void> deleteMessage(Message message) async {
-    await Message.delete(message.guid!);
+    final deletedGuid = message.guid!;
+    await Message.delete(deletedGuid);
     removeMessage(message);
+    await _updateLatestMessageAfterDeletion(deletedGuid);
+  }
+
+  /// Soft-delete a message (sets dateDeleted) and remove it from the struct and MessageState.
+  /// If the deleted message was the chat's latest, updates the chat's latest message
+  /// in both the database and reactive state.
+  Future<void> softDeleteMessage(Message message) async {
+    final deletedGuid = message.guid!;
+    await Message.softDelete(deletedGuid);
+    removeMessage(message);
+    await _updateLatestMessageAfterDeletion(deletedGuid);
+  }
+
+  /// If [deletedGuid] was the chat's latest message, fetches the new latest from the
+  /// database and updates both [ChatState] and the [Chat] DB record.
+  Future<void> _updateLatestMessageAfterDeletion(String deletedGuid) async {
+    if (kIsWeb) return;
+    final chatState = ChatsSvc.getChatState(tag);
+    if (chatState == null || chatState.latestMessage.value?.guid != deletedGuid) return;
+    final chat = ChatsSvc.findChatByGuid(tag);
+    if (chat == null) return;
+    final latest = Chat.getMessages(chat, limit: 1);
+    if (latest.isNotEmpty) {
+      ChatsSvc.updateChatLatestMessage(tag, latest.first);
+    }
   }
 
   /// Toggle bookmark status on a message
@@ -1292,7 +1325,7 @@ class MessagesService extends GetxController {
     }
 
     try {
-      final response = await HttpSvc.edit(
+      final response = await HttpSvc.message.edit(
         messageGuid,
         newText,
         "Edited to: '$newText'",
@@ -1374,7 +1407,7 @@ class MessagesService extends GetxController {
     }
 
     try {
-      final response = await HttpSvc.unsend(messageGuid, partIndex: partIndex);
+      final response = await HttpSvc.message.unsend(messageGuid, partIndex: partIndex);
       final updatedMessage = Message.fromMap(response.data['data']);
       IncomingMsgHandler.handle(IncomingPayload(
         type: MessageEventType.updatedMessage,
@@ -1477,21 +1510,23 @@ class MessagesService extends GetxController {
       if (_messages.isEmpty) {
         // get from server and save
         final fromServer = await ChatsSvc.getMessages(chat.guid, offset: offset, limit: limit);
-        final temp = await MessageHelper.bulkAddMessages(chat, fromServer, checkForLatestMessageText: false);
+        final rawMessages = fromServer.cast<Map<String, dynamic>>();
+        final syncResult = await SyncInterface.bulkSyncData(
+          chatData: chat.toMap(),
+          messagesData: rawMessages,
+        );
         if (!kIsWeb) {
           // Prefer the bulk-loaded list (already hydrated via getMany on the main thread)
           // over a second link-query, which can return 0 for newly-created chats whose
           // chat.targetId index hasn't yet been flushed to the read snapshot.
           // If temp is empty (bulk add found nothing new) fall back to the link query.
-          if (temp.isNotEmpty) {
-            _messages = temp;
+          if (syncResult.messages.isNotEmpty) {
+            _messages = syncResult.messages;
           } else {
             _messages = await Chat.getMessagesAsync(chat, offset: offset, limit: limit);
           }
 
-          // Sync the chat's latestMessage into ChatState after the server fetch,
-          // since bulkAddMessages was called with checkForLatestMessageText=false.
-          //
+          // Sync the chat's latestMessage into ChatState after the server fetch.
           // Guards:
           // 1. offset == 0: only the first (newest) page should affect latestMessage.
           //    Loading older pages must never overwrite a newer latest.
@@ -1500,26 +1535,30 @@ class MessagesService extends GetxController {
           //    dbLatestMessage when _latestMessage is null, which queries the DB — and at
           //    this point the DB now contains the just-bulk-added old messages, so that
           //    query returns a stale old date and defeats the freshness check entirely.
-          if (offset == 0 && _messages.isNotEmpty) {
-            final latest =
-                (_messages.where((m) => m.associatedMessageGuid == null).toList()..sort(Message.sort)).firstOrNull;
-            final state = ChatsSvc.getChatState(chat.guid);
-            // epoch(0) is the sentinel returned when no messages exist yet — treat it as no current latest.
-            final currentDate = state?.latestMessage.value?.dateCreated;
-            final hasRealCurrent = currentDate != null && currentDate.millisecondsSinceEpoch > 0;
-            final latestDate = latest?.dateCreated;
-            if (latest != null && (!hasRealCurrent || (latestDate != null && latestDate.isAfter(currentDate)))) {
-              ChatsSvc.updateChatLatestMessage(chat.guid, latest);
+          if (offset == 0) {
+            for (final updatedChat in syncResult.chats) {
+              final state = ChatsSvc.getChatState(updatedChat.guid);
+              if (state != null && updatedChat.dbLatestMessage.target?.dateCreated != null) {
+                final currentDate = state.latestMessage.value?.dateCreated;
+                final hasRealCurrent = currentDate != null && currentDate.millisecondsSinceEpoch > 0;
+                final latestMsg = updatedChat.dbLatestMessage.target;
+                if (latestMsg != null &&
+                    (!hasRealCurrent ||
+                        (latestMsg.dateCreated != null && latestMsg.dateCreated!.isAfter(currentDate) == true))) {
+                  ChatsSvc.updateChatLatestMessage(updatedChat.guid, latestMsg);
+                }
+              }
             }
           }
         } else {
-          final reactions = temp.where((e) => e.associatedMessageGuid != null);
+          final reactions = syncResult.messages.where((e) => e.associatedMessageGuid != null);
           for (Message m in reactions) {
-            final associatedMessage = temp.firstWhereOrNull((element) => element.guid == m.associatedMessageGuid);
+            final associatedMessage =
+                syncResult.messages.firstWhereOrNull((element) => element.guid == m.associatedMessageGuid);
             associatedMessage?.hasReactions = true;
             associatedMessage?.associatedMessages.add(m);
           }
-          _messages = temp;
+          _messages = syncResult.messages;
         }
       }
     } catch (e, s) {
@@ -1615,7 +1654,8 @@ class MessagesService extends GetxController {
     if (withChatParticipants) withQuery.add("chat.participants");
     withQuery.add("attachment.metadata");
 
-    HttpSvc.messages(
+    HttpSvc.message
+        .query(
             withQuery: withQuery,
             where: where,
             sort: sort,

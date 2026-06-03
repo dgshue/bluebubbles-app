@@ -1,6 +1,8 @@
 import 'package:adaptive_theme/adaptive_theme.dart';
 import 'package:bluebubbles/app/layouts/conversation_details/dialogs/chat_sync_dialog.dart';
+import 'package:bluebubbles/app/layouts/conversation_details/dialogs/sync_time_range_dialog.dart';
 import 'package:bluebubbles/app/layouts/conversation_details/dialogs/timeframe_picker.dart';
+import 'package:bluebubbles/app/layouts/conversation_details/widgets/adaptive_theme_variant_picker.dart';
 import 'package:bluebubbles/app/layouts/conversation_view/widgets/message/reply/reply_thread_popup.dart';
 import 'package:bluebubbles/helpers/helpers.dart';
 import 'package:bluebubbles/app/layouts/settings/widgets/settings_widgets.dart';
@@ -58,13 +60,18 @@ class _ChatOptionsState extends State<ChatOptions> with ThemeHelpers {
                     ),
                     isThreeLine: true,
                     onTap: () async {
-                      await MethodChannelSvc.invokeMethod("open-conversation-notification-settings",
-                          {"channel_id": chat.guid, "display_name": chat.getTitle()});
+                      await MethodChannelSvc.actions.openConversationNotificationSettings(
+                        channelId: chat.guid,
+                        displayName: chat.getTitle(),
+                      );
                     },
                   ),
+                if (!kIsWeb && !kIsDesktop && (FilesystemSvc.androidInfo?.version.sdkInt ?? 0) >= 30)
+                  const SettingsDivider(),
                 if (!kIsWeb)
                   SettingsTile(
                     title: "Change Chat Avatar",
+                    subtitle: "Set a custom avatar for this chat, or reset it back to the default",
                     trailing: Padding(
                       padding: const EdgeInsets.only(right: 15.0),
                       child: Icon(
@@ -128,9 +135,11 @@ class _ChatOptionsState extends State<ChatOptions> with ThemeHelpers {
                       }
                     },
                   ),
+                if (!kIsWeb) const SettingsDivider(),
                 if (!kIsWeb)
                   SettingsTile(
                     title: "Custom Background",
+                    subtitle: "Set a custom background for this chat, or reset it back to the default",
                     trailing: Padding(
                       padding: const EdgeInsets.only(right: 15.0),
                       child: Icon(
@@ -194,6 +203,55 @@ class _ChatOptionsState extends State<ChatOptions> with ThemeHelpers {
                       }
                     },
                   ),
+                if (!kIsWeb)
+                  Obx(() {
+                    final chatState = ChatsSvc.getChatState(chat.guid);
+                    final hasBackground = chatState?.customBackgroundPath.value != null;
+                    if (!hasBackground) return const SizedBox.shrink();
+                    final adaptiveEnabled = chatState!.adaptiveThemeEnabled.value;
+                    return Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SettingsDivider(),
+                        SettingsSwitch(
+                          title: "Adaptive Chat Theme",
+                          subtitle: "Generate a theme from your background image colors",
+                          initialVal: adaptiveEnabled,
+                          onChanged: (value) {
+                            ChatsSvc.setAdaptiveThemeEnabled(chat, value);
+                          },
+                          backgroundColor: tileColor,
+                        ),
+                        if (adaptiveEnabled) ...[
+                          const SettingsDivider(),
+                          SettingsTile(
+                            title: "Light Mode Theme",
+                            subtitle: "Choose a variant for light mode",
+                            backgroundColor: tileColor,
+                            trailing: const SizedBox.shrink(),
+                          ),
+                          AdaptiveThemeVariantPicker(
+                            chat: chat,
+                            brightness: Brightness.light,
+                            backgroundColor: tileColor,
+                          ),
+                          const SettingsDivider(),
+                          SettingsTile(
+                            title: "Dark Mode Theme",
+                            subtitle: "Choose a variant for dark mode",
+                            backgroundColor: tileColor,
+                            trailing: const SizedBox.shrink(),
+                          ),
+                          AdaptiveThemeVariantPicker(
+                            chat: chat,
+                            brightness: Brightness.dark,
+                            backgroundColor: tileColor,
+                          ),
+                        ],
+                      ],
+                    );
+                  }),
+                const SettingsDivider(),
                 if (iOS)
                   SettingsTile(
                       title: "View Bookmarks",
@@ -206,6 +264,7 @@ class _ChatOptionsState extends State<ChatOptions> with ThemeHelpers {
                       onTap: () async {
                         showBookmarksThread(cvc(widget.chat), context);
                       }),
+                const SettingsDivider(),
                 SettingsTile(
                     title: "Fetch Chat Details",
                     subtitle: "Get the latest chat title and participants from the server",
@@ -225,40 +284,26 @@ class _ChatOptionsState extends State<ChatOptions> with ThemeHelpers {
                       }
                       showSnackbar("Notice", "Fetched details!");
                     }),
+                const SettingsDivider(),
                 SettingsTile(
-                  title: "Fetch More Messages",
-                  subtitle: "Fetches up to 100 messages after the last message stored locally",
-                  isThreeLine: true,
+                  title: "Sync Messages",
+                  subtitle: "Fetch and sync messages from the server for a selected time range",
                   trailing: Padding(
                     padding: const EdgeInsets.only(right: 15.0),
-                    child: Icon(iOS ? CupertinoIcons.cloud_download : Icons.file_download),
+                    child: Icon(iOS ? CupertinoIcons.arrow_counterclockwise : Icons.replay),
                   ),
                   onTap: () async {
+                    final range = await showSyncTimeRangeDialog(context);
+                    if (range == null || !context.mounted) return;
                     await showDialog(
                       context: context,
                       barrierDismissible: false,
                       builder: (context) => ChatSyncDialog(
                         chat: chat,
-                        withOffset: true,
-                        initialMessage: "Fetching more messages...",
-                        limit: 100,
+                        initialMessage: "Syncing messages...",
+                        start: range.start,
+                        end: range.end,
                       ),
-                    );
-                  },
-                ),
-                SettingsTile(
-                  title: "Sync Last 25 Messages",
-                  subtitle: "Resyncs the 25 most recent messages from the server",
-                  trailing: Padding(
-                    padding: const EdgeInsets.only(right: 15.0),
-                    child: Icon(iOS ? CupertinoIcons.arrow_counterclockwise : Icons.replay),
-                  ),
-                  onTap: () {
-                    showDialog(
-                      context: context,
-                      barrierDismissible: false,
-                      builder: (context) =>
-                          ChatSyncDialog(chat: chat, initialMessage: "Resyncing messages...", limit: 25),
                     );
                   },
                 ),
@@ -268,6 +313,7 @@ class _ChatOptionsState extends State<ChatOptions> with ThemeHelpers {
                     final chatState = ChatsSvc.getChatState(chat.guid);
                     return SettingsSwitch(
                       title: "Send Typing Indicators",
+                      subtitle: "Send typing indicators for this chat, overriding the global setting",
                       initialVal: chatState?.autoSendTypingIndicators.value ??
                           SettingsSvc.settings.privateSendTypingIndicators.value,
                       onChanged: (value) {
@@ -280,6 +326,7 @@ class _ChatOptionsState extends State<ChatOptions> with ThemeHelpers {
                       backgroundColor: tileColor,
                     );
                   }),
+                if (!kIsWeb && !chat.isGroup && SettingsSvc.settings.enablePrivateAPI.value) const SettingsDivider(),
                 if (!kIsWeb && !chat.isGroup && SettingsSvc.settings.enablePrivateAPI.value)
                   Obx(() {
                     final chatState = ChatsSvc.getChatState(chat.guid);
@@ -308,6 +355,7 @@ class _ChatOptionsState extends State<ChatOptions> with ThemeHelpers {
                     return SettingsSwitch(
                       title:
                           "${SettingsSvc.settings.privateManualMarkAsRead.value ? "Automatically " : ""}Send Read Receipts",
+                      subtitle: "Send read receipts for this chat, overriding the global setting",
                       initialVal:
                           chatState?.autoSendReadReceipts.value ?? SettingsSvc.settings.privateMarkChatAsRead.value,
                       onChanged: (value) {
@@ -320,6 +368,7 @@ class _ChatOptionsState extends State<ChatOptions> with ThemeHelpers {
                       backgroundColor: tileColor,
                     );
                   }),
+                if (!kIsWeb && !chat.isGroup && SettingsSvc.settings.enablePrivateAPI.value) const SettingsDivider(),
                 if (!kIsWeb && !chat.isGroup && SettingsSvc.settings.enablePrivateAPI.value)
                   Obx(() {
                     final chatState = ChatsSvc.getChatState(chat.guid);
@@ -360,6 +409,7 @@ class _ChatOptionsState extends State<ChatOptions> with ThemeHelpers {
                       },
                     );
                   }),
+                if (chat.isGroup) const SettingsDivider(),
                 if (chat.isGroup)
                   Obx(() {
                     final chatState = ChatsSvc.getChatState(chat.guid);
@@ -384,6 +434,7 @@ class _ChatOptionsState extends State<ChatOptions> with ThemeHelpers {
                     final chatState = ChatsSvc.getChatState(chat.guid);
                     return SettingsSwitch(
                       title: "Pin Conversation",
+                      subtitle: "Keep this chat pinned to the top of your conversation list",
                       initialVal: chatState?.isPinned.value ?? chat.isPinned!,
                       onChanged: (value) {
                         ChatsSvc.setChatPinned(chatState?.chat ?? chat, !(chatState?.isPinned.value ?? chat.isPinned!));
@@ -391,11 +442,13 @@ class _ChatOptionsState extends State<ChatOptions> with ThemeHelpers {
                       backgroundColor: tileColor,
                     );
                   }),
+                if (!kIsWeb) const SettingsDivider(),
                 if (!kIsWeb)
                   Obx(() {
                     final chatState = ChatsSvc.getChatState(chat.guid);
                     return SettingsSwitch(
                       title: "Mute Conversation",
+                      subtitle: "Silence notifications for this chat",
                       initialVal: (chatState?.muteType.value ?? chat.muteType) == "mute",
                       onChanged: (value) {
                         if (chatState != null) {
@@ -407,11 +460,13 @@ class _ChatOptionsState extends State<ChatOptions> with ThemeHelpers {
                       backgroundColor: tileColor,
                     );
                   }),
+                if (!kIsWeb) const SettingsDivider(),
                 if (!kIsWeb)
                   Obx(() {
                     final chatState = ChatsSvc.getChatState(chat.guid);
                     return SettingsSwitch(
                       title: "Archive Conversation",
+                      subtitle: "Hide this chat from your main conversation list",
                       initialVal: chatState?.isArchived.value ?? chat.isArchived!,
                       onChanged: (value) {
                         ChatsSvc.setChatArchived(chatState?.chat ?? chat, value);
@@ -419,6 +474,7 @@ class _ChatOptionsState extends State<ChatOptions> with ThemeHelpers {
                       backgroundColor: tileColor,
                     );
                   }),
+                if (!kIsWeb) const SettingsDivider(),
                 if (!kIsWeb)
                   SettingsTile(
                     title: "Clear Transcript",
@@ -462,6 +518,7 @@ class _ChatOptionsState extends State<ChatOptions> with ThemeHelpers {
                       );
                     },
                   ),
+                if (!kIsWeb) const SettingsDivider(),
                 if (!kIsWeb)
                   SettingsTile(
                     title: "Download Chat Transcript",
@@ -632,11 +689,61 @@ class _ChatOptionsState extends State<ChatOptions> with ThemeHelpers {
                       showSnackbar("Success", "Saved transcript to the downloads folder");
                     },
                   ),
+                Obx(() {
+                  if (!OutgoingMsgHandler.pendingChatGuids.contains(chat.guid)) return const SizedBox.shrink();
+                  return SettingsTile(
+                    title: "Cancel Outgoing Messages",
+                    subtitle: "Cancel all messages currently queued to be sent in this chat",
+                    trailing: Padding(
+                      padding: const EdgeInsets.only(right: 15.0),
+                      child: Icon(
+                        iOS ? CupertinoIcons.xmark_circle : Icons.cancel_outlined,
+                        color: context.theme.colorScheme.error,
+                      ),
+                    ),
+                    onTap: () => _showCancelConfirmation(context),
+                  );
+                }),
               ],
             ),
           ],
         ),
       ),
+    );
+  }
+
+  void _showCancelConfirmation(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: context.theme.colorScheme.surfaceContainerHighest,
+          title: Text("Cancel Outgoing Messages?", style: context.theme.textTheme.titleLarge),
+          content: Text(
+            'This will cancel all messages currently waiting to be sent in this chat. They will be marked as failed.',
+            style: context.theme.textTheme.bodyLarge,
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: Text(
+                "Keep Sending",
+                style: context.theme.textTheme.bodyLarge!.copyWith(color: context.theme.colorScheme.primary),
+              ),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+            TextButton(
+              child: Text(
+                "Cancel Messages",
+                style: context.theme.textTheme.bodyLarge!.copyWith(color: context.theme.colorScheme.error),
+              ),
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await OutgoingMsgHandler.cancelPendingForChat(chat.guid);
+              },
+            ),
+          ],
+        );
+      },
     );
   }
 }

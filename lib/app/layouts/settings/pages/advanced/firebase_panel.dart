@@ -209,13 +209,13 @@ class _FirebasePanelState extends State<FirebasePanel> with ThemeHelpers {
                     Obx(() {
                       final _enabled =
                           SettingsSvc.settings.firstFcmRegisterDate.value != 0 && !SettingsSvc.fcmData.isNull;
-                      if (_enabled && !isSnap) return const SizedBox.shrink();
+                      if (_enabled) return const SizedBox.shrink();
                       return const SettingsDivider();
                     }),
                     Obx(() {
                       final _enabled =
                           SettingsSvc.settings.firstFcmRegisterDate.value != 0 && !SettingsSvc.fcmData.isNull;
-                      if (_enabled && !isSnap) return const SizedBox.shrink();
+                      if (_enabled) return const SizedBox.shrink();
 
                       return SettingsTile(
                           leading: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -315,21 +315,20 @@ class _FirebasePanelState extends State<FirebasePanel> with ThemeHelpers {
                       final _enabled =
                           SettingsSvc.settings.firstFcmRegisterDate.value != 0 && !SettingsSvc.fcmData.isNull;
                       if (!_enabled) return const SizedBox.shrink();
-                      return Container(
-                          child: Padding(
-                              padding: const EdgeInsets.only(bottom: 8.0, left: 22, top: 8.0, right: 15),
-                              child: SelectableText.rich(
-                                TextSpan(children: [
-                                  const TextSpan(text: "Project ID: ", style: TextStyle(fontWeight: FontWeight.bold)),
-                                  TextSpan(text: SettingsSvc.fcmData.projectID!),
-                                  const TextSpan(text: "\n"),
-                                  const TextSpan(text: "App ID: ", style: TextStyle(fontWeight: FontWeight.bold)),
-                                  TextSpan(text: SettingsSvc.fcmData.applicationID!),
-                                  const TextSpan(text: "\n"),
-                                  const TextSpan(text: "Firebase URL: ", style: TextStyle(fontWeight: FontWeight.bold)),
-                                  TextSpan(text: SettingsSvc.fcmData.firebaseURL ?? "N/A"),
-                                ]),
-                              )));
+                      return Padding(
+                          padding: const EdgeInsets.only(bottom: 8.0, left: 22, top: 8.0, right: 15),
+                          child: SelectableText.rich(
+                            TextSpan(children: [
+                              const TextSpan(text: "Project ID: ", style: TextStyle(fontWeight: FontWeight.bold)),
+                              TextSpan(text: SettingsSvc.fcmData.projectID!),
+                              const TextSpan(text: "\n"),
+                              const TextSpan(text: "App ID: ", style: TextStyle(fontWeight: FontWeight.bold)),
+                              TextSpan(text: SettingsSvc.fcmData.applicationID!),
+                              const TextSpan(text: "\n"),
+                              const TextSpan(text: "Firebase URL: ", style: TextStyle(fontWeight: FontWeight.bold)),
+                              TextSpan(text: SettingsSvc.fcmData.firebaseURL ?? "N/A"),
+                            ]),
+                          ));
                     }),
                   ],
                 ),
@@ -393,7 +392,7 @@ class _FirebasePanelState extends State<FirebasePanel> with ThemeHelpers {
                                           // Delete the Firebase FCM token
                                           try {
                                             if (FirebaseSvc.token != null) {
-                                              await MethodChannelSvc.invokeMethod("firebase-delete-token");
+                                              await MethodChannelSvc.actions.firebaseDeleteToken();
                                             }
                                           } catch (e, s) {
                                             Logger.error("Failed to delete Firebase FCM token", error: e, trace: s);

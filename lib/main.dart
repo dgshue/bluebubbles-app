@@ -130,8 +130,9 @@ Future<Null> initApp(bool bubble, List<String> arguments) async {
         if (Platform.isWindows) {
           await Window.hideWindowControls();
         } else if (Platform.isLinux) {
-          await windowManager.setTitleBarStyle(
-              SettingsSvc.settings.useCustomTitleBar.value ? TitleBarStyle.hidden : TitleBarStyle.normal);
+          await windowManager.setTitleBarStyle(SettingsSvc.settings.titleBarStyle.value == BBTitleBarStyle.native
+              ? TitleBarStyle.normal
+              : TitleBarStyle.hidden);
         }
         windowManager.addListener(DesktopWindowListener.instance);
         doWhenWindowReady(() async {
@@ -139,25 +140,23 @@ Future<Null> initApp(bool bubble, List<String> arguments) async {
           Display primary = await ScreenRetriever.instance.getPrimaryDisplay();
 
           Size size = await windowManager.getSize();
-          double width = PrefsSvc.i.getDouble("window-width") ?? size.width;
-          double height = PrefsSvc.i.getDouble("window-height") ?? size.height;
+          double width = PrefsSvc.desktop.getWindowWidth() ?? size.width;
+          double height = PrefsSvc.desktop.getWindowHeight() ?? size.height;
 
           width = width.clamp(300, max(300, primary.size.width));
           height = height.clamp(300, max(300, primary.size.height));
           await windowManager.setSize(Size(width, height));
-          await PrefsSvc.i.setDouble("window-width", width);
-          await PrefsSvc.i.setDouble("window-height", height);
+          await PrefsSvc.desktop.setWindowDimensions(width: width, height: height);
 
           await windowManager.setAlignment(Alignment.center);
           Offset offset = await windowManager.getPosition();
-          double? posX = PrefsSvc.i.getDouble("window-x") ?? offset.dx;
-          double? posY = PrefsSvc.i.getDouble("window-y") ?? offset.dy;
+          double? posX = PrefsSvc.desktop.getWindowX() ?? offset.dx;
+          double? posY = PrefsSvc.desktop.getWindowY() ?? offset.dy;
 
           posX = posX.clamp(0, max(0, primary.size.width - width));
           posY = posY.clamp(0, max(0, primary.size.height - height));
           await windowManager.setPosition(Offset(posX, posY), animate: true);
-          await PrefsSvc.i.setDouble("window-x", posX);
-          await PrefsSvc.i.setDouble("window-y", posY);
+          await PrefsSvc.desktop.setWindowOffsets(x: posX, y: posY);
 
           await windowManager.setTitle('BlueBubbles');
           if (arguments.firstOrNull != "minimized") {
@@ -228,15 +227,13 @@ class DesktopWindowListener extends WindowListener {
   @override
   void onWindowResized() async {
     Size size = await windowManager.getSize();
-    await PrefsSvc.i.setDouble("window-width", size.width);
-    await PrefsSvc.i.setDouble("window-height", size.height);
+    await PrefsSvc.desktop.setWindowDimensions(width: size.width, height: size.height);
   }
 
   @override
   void onWindowMoved() async {
     Offset offset = await windowManager.getPosition();
-    await PrefsSvc.i.setDouble("window-x", offset.dx);
-    await PrefsSvc.i.setDouble("window-y", offset.dy);
+    await PrefsSvc.desktop.setWindowOffsets(x: offset.dx, y: offset.dy);
   }
 
   @override
@@ -276,8 +273,20 @@ class Main extends StatelessWidget {
       builder: (theme, darkTheme) => GetMaterialApp(
         debugShowCheckedModeBanner: false,
         title: 'BlueBubbles',
-        theme: theme.copyWith(appBarTheme: theme.appBarTheme.copyWith(elevation: 0.0)),
-        darkTheme: darkTheme.copyWith(appBarTheme: darkTheme.appBarTheme.copyWith(elevation: 0.0)),
+        theme: theme.copyWith(
+          appBarTheme: theme.appBarTheme.copyWith(elevation: 0.0),
+          dialogTheme: DialogThemeData(
+            barrierColor: theme.colorScheme.shadow.withValues(alpha: 0.6),
+            backgroundColor: theme.colorScheme.surfaceContainerHighest,
+          ),
+        ),
+        darkTheme: darkTheme.copyWith(
+          appBarTheme: darkTheme.appBarTheme.copyWith(elevation: 0.0),
+          dialogTheme: DialogThemeData(
+            barrierColor: darkTheme.colorScheme.shadow.withValues(alpha: 0.6),
+            backgroundColor: darkTheme.colorScheme.surfaceContainerHighest,
+          ),
+        ),
         navigatorKey: NavigationSvc.key,
         navigatorObservers: [routeObserver],
         scrollBehavior: const MaterialScrollBehavior().copyWith(
@@ -352,6 +361,7 @@ class Main extends StatelessWidget {
                             .then((result) {
                           isAuthing = false;
                           if (result) {
+                            if (!context.mounted) return;
                             SecureApplicationProvider.of(context, listen: false)!.authSuccess(unlock: true);
                             if (kIsDesktop) {
                               Future.delayed(Duration.zero, () {
@@ -463,7 +473,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver, TrayListener {
       };
       /* ----- SERVER VERSION CHECK ----- */
       if (kIsWeb && SettingsSvc.settings.finishedSetup.value) {
-        final serverDetails = await SettingsSvc.getServerDetails();
+        final serverDetails = SettingsSvc.getServerDetails();
         if (!serverDetails.minimumWebSupportedVersion) {
           setState(() {
             serverCompatible = false;

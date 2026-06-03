@@ -128,7 +128,9 @@ class _TextBubbleState extends State<TextBubble> with ThemeHelpers {
         color: isFromMe && !message.isBigEmoji
             ? (selected
                 ? context.theme.colorScheme.tertiaryContainer
-                : context.theme.colorScheme.primary.darkenAmount(isTempMessage ? 0.2 : 0))
+                : context.theme.colorScheme
+                    .bubble(context, message.chat.target?.isIMessage ?? true)
+                    .darkenAmount(isTempMessage ? 0.2 : 0))
             : null,
         decoration: isFromMe || message.isBigEmoji
             ? null
@@ -148,7 +150,7 @@ class _TextBubbleState extends State<TextBubble> with ThemeHelpers {
               colorOverride: selected
                   ? context.theme.colorScheme.onTertiaryContainer
                   : SettingsSvc.settings.colorfulBubbles.value && !isFromMe
-                      ? getBubbleColors(selected).first.oppositeLightenOrDarken(75)
+                      ? getBubbleColors(selected).first.oppositeLightenOrDarken(90)
                       : null,
               hideBodyText: widget.subjectOnly,
             ),
@@ -159,7 +161,7 @@ class _TextBubbleState extends State<TextBubble> with ThemeHelpers {
               colorOverride: selected
                   ? context.theme.colorScheme.onTertiaryContainer
                   : SettingsSvc.settings.colorfulBubbles.value && !isFromMe
-                      ? getBubbleColors(selected).first.oppositeLightenOrDarken(75)
+                      ? getBubbleColors(selected).first.oppositeLightenOrDarken(90)
                       : null,
               hideBodyText: widget.subjectOnly,
             ),

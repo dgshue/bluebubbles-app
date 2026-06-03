@@ -10,6 +10,7 @@ import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:particles_flutter/engine.dart';
+import 'package:particles_flutter/interactions.dart';
 import 'package:simple_animations/simple_animations.dart';
 import 'package:supercharged/supercharged.dart';
 
@@ -228,11 +229,12 @@ class _BubbleEffectsState extends State<BubbleEffects> with SingleTickerProvider
                           connectUpper: false,
                         ),
                         child: BackdropFilter(
-                          filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+                          filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
                           child: Particles(
                             key: UniqueKey(),
                             height: size.height,
                             width: size.width,
+                            interaction: ParticleInteraction.none(),
                             particles: List.generate(
                                 size.height * size.width ~/ 25,
                                 (index) => CircularParticle(

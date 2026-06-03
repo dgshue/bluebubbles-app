@@ -242,7 +242,7 @@ class _ServerCredentialsState extends State<ServerCredentials> with ThemeHelpers
                   ),
                 ),
               if (token.value != null) const SizedBox(height: 10),
-              if (googleName.value == null && showLoginButtons.value && !isSnap)
+              if (googleName.value == null && showLoginButtons.value)
                 Container(
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(20),
@@ -264,7 +264,7 @@ class _ServerCredentialsState extends State<ServerCredentials> with ThemeHelpers
                     onPressed: () async {
                       token.value = await googleOAuth(context);
                       if (token.value != null) {
-                        final response = await HttpSvc.getGoogleInfo(token.value!);
+                        final response = await HttpSvc.firebase.getGoogleInfo(token.value!);
                         googleName.value = response.data['name'];
                         googlePicture.value = response.data['picture'];
                         fetchingFirebase.value = true;
@@ -291,7 +291,7 @@ class _ServerCredentialsState extends State<ServerCredentials> with ThemeHelpers
                     ),
                   ),
                 ),
-              if (googleName.value == null && showLoginButtons.value && !isSnap) const SizedBox(height: 10),
+              if (googleName.value == null && showLoginButtons.value) const SizedBox(height: 10),
               if (googleName.value == null && !kIsWeb && !kIsDesktop && showLoginButtons.value)
                 Container(
                   decoration: BoxDecoration(
@@ -663,7 +663,7 @@ class _ServerCredentialsState extends State<ServerCredentials> with ThemeHelpers
     );
 
     dio.Response? serverResponse;
-    await HttpSvc.serverInfo().then((response) {
+    await HttpSvc.server.info().then((response) {
       serverResponse = response;
     }).catchError((err) {
       if (err is dio.Response) {
@@ -671,7 +671,7 @@ class _ServerCredentialsState extends State<ServerCredentials> with ThemeHelpers
       }
     });
     dio.Response? fcmResponse;
-    await HttpSvc.fcmClient().then((response) {
+    await HttpSvc.fcm.getServiceAccount().then((response) {
       fcmResponse = response;
     }).catchError((err) {
       if (err is dio.Response) {

@@ -497,7 +497,7 @@ Future<void> goToSearch(BuildContext context) async {
 Future<void> goToFindMy(BuildContext context) async {
   final currentChat = ChatsSvc.activeChat?.chat;
   NavigationSvc.closeAllConversationView(context);
-  await ChatsSvc.setAllInactive();
+  ChatsSvc.setAllInactive();
   await Navigator.of(Get.context!).push(
     ThemeSwitcher.buildPageRoute(
       builder: (BuildContext context) {
@@ -506,7 +506,7 @@ Future<void> goToFindMy(BuildContext context) async {
     ),
   );
   if (currentChat != null) {
-    await ChatsSvc.setActiveChat(currentChat);
+    ChatsSvc.setActiveChat(currentChat);
     if (SettingsSvc.settings.tabletMode.value) {
       NavigationSvc.pushAndRemoveUntil(
         context,
@@ -548,9 +548,11 @@ void logout(BuildContext context) {
               SocketSvc.forgetConnection();
               SettingsSvc.settings = Settings();
               SettingsSvc.fcmData = FCMData();
-              await PrefsSvc.i.clear();
-              await PrefsSvc.i.setString("selected-dark", "OLED Dark");
-              await PrefsSvc.i.setString("selected-light", "Bright White");
+              await PrefsSvc.admin.clearAll();
+              await PrefsSvc.theme.setSelectedThemes(
+                darkTheme: "OLED Dark",
+                lightTheme: "Bright White",
+              );
               Get.offAll(
                   () => const PopScope(
                         canPop: false,
@@ -578,7 +580,7 @@ void goToUnknownSenders(BuildContext context) {
 Future<void> goToSettings(BuildContext context) async {
   final currentChat = ChatsSvc.activeChat?.chat;
   NavigationSvc.closeAllConversationView(context);
-  await ChatsSvc.setAllInactive();
+  ChatsSvc.setAllInactive();
   await Navigator.of(Get.context!).push(
     ThemeSwitcher.buildPageRoute(
       builder: (BuildContext context) {
@@ -587,7 +589,7 @@ Future<void> goToSettings(BuildContext context) async {
     ),
   );
   if (currentChat != null) {
-    await ChatsSvc.setActiveChat(currentChat);
+    ChatsSvc.setActiveChat(currentChat);
     if (SettingsSvc.settings.tabletMode.value) {
       NavigationSvc.pushAndRemoveUntil(
         context,
@@ -595,7 +597,7 @@ Future<void> goToSettings(BuildContext context) async {
           chat: currentChat,
         ),
         (route) => route.isFirst,
-      ).onError((error, stackTrace) => ChatsSvc.setAllInactiveSync());
+      ).onError((error, stackTrace) => ChatsSvc.setAllInactive());
     } else {
       cvc(currentChat).close();
     }

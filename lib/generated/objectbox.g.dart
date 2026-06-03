@@ -145,7 +145,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(3, 9017250848141753702),
     name: 'Chat',
-    lastPropertyId: const obx_int.IdUid(29, 439007349630700534),
+    lastPropertyId: const obx_int.IdUid(34, 6097956829538166324),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -278,6 +278,33 @@ final _entities = <obx_int.ModelEntity>[
       obx_int.ModelProperty(
         id: const obx_int.IdUid(29, 439007349630700534),
         name: 'customBackgroundPath',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(30, 5609008615344379625),
+        name: 'dbLatestMessageId',
+        type: 11,
+        flags: 520,
+        indexId: const obx_int.IdUid(19, 7371282683088301083),
+        relationField: 'dbLatestMessage',
+        relationTarget: 'Message',
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(31, 8712146833870022765),
+        name: 'adaptiveThemeEnabled',
+        type: 1,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(33, 8853311400813838140),
+        name: 'adaptiveThemeVariantLight',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(34, 6097956829538166324),
+        name: 'adaptiveThemeVariantDark',
         type: 9,
         flags: 0,
       ),
@@ -1028,7 +1055,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
     generatorVersion: obx_int.GeneratorVersion.v2025_12_16,
     entities: _entities,
     lastEntityId: const obx_int.IdUid(18, 7539271658762089511),
-    lastIndexId: const obx_int.IdUid(18, 669353420101708385),
+    lastIndexId: const obx_int.IdUid(19, 7371282683088301083),
     lastRelationId: const obx_int.IdUid(2, 2117154782513366348),
     lastSequenceId: const obx_int.IdUid(0, 0),
     retiredEntityUids: const [
@@ -1156,6 +1183,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
       8329508394572392433,
       128649823768535358,
       8841030829401354828,
+      5762172898544447362,
     ],
     retiredRelationUids: const [],
     modelVersion: 5,
@@ -1296,7 +1324,7 @@ obx_int.ModelDefinition getObjectBoxModel() {
     ),
     Chat: obx_int.EntityDefinition<Chat>(
       model: _entities[1],
-      toOneRelations: (Chat object) => [],
+      toOneRelations: (Chat object) => [object.dbLatestMessage],
       toManyRelations: (Chat object) => {
         obx_int.RelInfo<Chat>.toMany(1, object.id!): object.handles,
         obx_int.RelInfo<Message>.toOneBacklink(
@@ -1325,7 +1353,11 @@ obx_int.ModelDefinition getObjectBoxModel() {
             object.lastReadMessageGuid == null ? null : fbb.writeString(object.lastReadMessageGuid!);
         final customBackgroundPathOffset =
             object.customBackgroundPath == null ? null : fbb.writeString(object.customBackgroundPath!);
-        fbb.startTable(30);
+        final adaptiveThemeVariantLightOffset =
+            object.adaptiveThemeVariantLight == null ? null : fbb.writeString(object.adaptiveThemeVariantLight!);
+        final adaptiveThemeVariantDarkOffset =
+            object.adaptiveThemeVariantDark == null ? null : fbb.writeString(object.adaptiveThemeVariantDark!);
+        fbb.startTable(35);
         fbb.addInt64(0, object.id ?? 0);
         fbb.addOffset(2, guidOffset);
         fbb.addOffset(4, chatIdentifierOffset);
@@ -1351,6 +1383,10 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addBool(26, object.lockChatIcon);
         fbb.addOffset(27, lastReadMessageGuidOffset);
         fbb.addOffset(28, customBackgroundPathOffset);
+        fbb.addInt64(29, object.dbLatestMessage.targetId);
+        fbb.addBool(30, object.adaptiveThemeEnabled);
+        fbb.addOffset(32, adaptiveThemeVariantLightOffset);
+        fbb.addOffset(33, adaptiveThemeVariantDarkOffset);
         fbb.finish(fbb.endTable());
         return object.id ?? 0;
       },
@@ -1429,6 +1465,18 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final lastReadMessageGuidParam = const fb.StringReader(
           asciiOptimization: true,
         ).vTableGetNullable(buffer, rootOffset, 58);
+        final adaptiveThemeEnabledParam = const fb.BoolReader().vTableGet(
+          buffer,
+          rootOffset,
+          64,
+          false,
+        );
+        final adaptiveThemeVariantLightParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGetNullable(buffer, rootOffset, 68);
+        final adaptiveThemeVariantDarkParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGetNullable(buffer, rootOffset, 70);
         final object = Chat(
           id: idParam,
           guid: guidParam,
@@ -1448,6 +1496,9 @@ obx_int.ModelDefinition getObjectBoxModel() {
           lockChatName: lockChatNameParam,
           lockChatIcon: lockChatIconParam,
           lastReadMessageGuid: lastReadMessageGuidParam,
+          adaptiveThemeEnabled: adaptiveThemeEnabledParam,
+          adaptiveThemeVariantLight: adaptiveThemeVariantLightParam,
+          adaptiveThemeVariantDark: adaptiveThemeVariantDarkParam,
         )
           ..dbOnlyLatestMessageDate = dbOnlyLatestMessageDateValue == null
               ? null
@@ -1465,6 +1516,13 @@ obx_int.ModelDefinition getObjectBoxModel() {
           ..customBackgroundPath = const fb.StringReader(
             asciiOptimization: true,
           ).vTableGetNullable(buffer, rootOffset, 60);
+        object.dbLatestMessage.targetId = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          62,
+          0,
+        );
+        object.dbLatestMessage.attach(store);
         obx_int.InternalToManyAccess.setRelInfo<Chat>(
           object.handles,
           store,
@@ -2512,6 +2570,26 @@ class Chat_ {
   /// See [Chat.customBackgroundPath].
   static final customBackgroundPath = obx.QueryStringProperty<Chat>(
     _entities[1].properties[21],
+  );
+
+  /// See [Chat.dbLatestMessage].
+  static final dbLatestMessage = obx.QueryRelationToOne<Chat, Message>(
+    _entities[1].properties[22],
+  );
+
+  /// See [Chat.adaptiveThemeEnabled].
+  static final adaptiveThemeEnabled = obx.QueryBooleanProperty<Chat>(
+    _entities[1].properties[23],
+  );
+
+  /// See [Chat.adaptiveThemeVariantLight].
+  static final adaptiveThemeVariantLight = obx.QueryStringProperty<Chat>(
+    _entities[1].properties[24],
+  );
+
+  /// See [Chat.adaptiveThemeVariantDark].
+  static final adaptiveThemeVariantDark = obx.QueryStringProperty<Chat>(
+    _entities[1].properties[25],
   );
 
   /// see [Chat.handles]

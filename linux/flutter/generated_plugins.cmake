@@ -4,6 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   bitsdojo_window_linux
+  desktop_drop
   desktop_webview_auth
   dynamic_color
   emoji_picker_flutter
@@ -11,7 +12,6 @@ list(APPEND FLUTTER_PLUGIN_LIST
   flutter_acrylic
   flutter_timezone
   gtk
-  irondash_engine_context
   local_notifier
   maps_launcher
   media_kit_libs_linux
@@ -21,11 +21,10 @@ list(APPEND FLUTTER_PLUGIN_LIST
   printing
   record_linux
   screen_retriever_linux
-  super_native_extensions
+  sqlite3_flutter_libs
   system_tray
   tray_manager
   url_launcher_linux
-  webcrypto
   window_manager
 )
 

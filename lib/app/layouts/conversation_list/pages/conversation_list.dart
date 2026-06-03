@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:bluebubbles/app/layouts/camera/camera_screen.dart';
 import 'package:bluebubbles/app/layouts/chat_creator/new_chat_creator.dart';
 import 'package:bluebubbles/app/layouts/conversation_list/widgets/conversation_list_fab.dart';
 import 'package:bluebubbles/app/layouts/conversation_list/widgets/footer/samsung_footer.dart';
@@ -10,18 +9,15 @@ import 'package:bluebubbles/app/layouts/conversation_list/widgets/initial_widget
 import 'package:bluebubbles/app/layouts/conversation_list/widgets/tile/conversation_tile.dart';
 import 'package:bluebubbles/app/layouts/conversation_list/widgets/tile/material_conversation_tile.dart';
 import 'package:bluebubbles/app/layouts/conversation_list/widgets/tile/samsung_conversation_tile.dart';
-import 'package:bluebubbles/app/layouts/conversation_view/pages/conversation_view.dart';
 import 'package:bluebubbles/app/wrappers/bb_scaffold.dart';
 import 'package:bluebubbles/app/wrappers/stateful_boilerplate.dart';
 import 'package:bluebubbles/app/wrappers/tablet_mode_wrapper.dart';
 import 'package:bluebubbles/database/models.dart';
 import 'package:bluebubbles/services/services.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' hide context;
 import 'package:permission_handler/permission_handler.dart';
-import 'package:universal_io/io.dart';
 import 'package:bluebubbles/helpers/helpers.dart';
 import 'package:bluebubbles/app/layouts/conversation_list/pages/cupertino_conversation_list.dart';
 import 'package:bluebubbles/app/layouts/conversation_list/pages/material_conversation_list.dart';
@@ -77,14 +73,7 @@ class ConversationListController extends StatefulController {
       }
     }
 
-    final XFile? file;
-    if (Platform.isAndroid && !kIsWeb) {
-      file = await Navigator.of(context).push<XFile?>(
-        MaterialPageRoute(builder: (_) => const CameraScreen()),
-      );
-    } else {
-      file = await ImagePicker().pickImage(source: ImageSource.camera);
-    }
+    final XFile? file = await ImagePicker().pickImage(source: ImageSource.camera);
     if (file == null) return;
 
     openNewChatCreator(context, existing: [
@@ -153,28 +142,6 @@ class _ConversationListState extends CustomState<ConversationList, void, Convers
           t.cancel();
         }
       });
-    }
-
-    // Extra safety check to make sure Android doesn't open the last chat when opening the app
-    if (kIsDesktop || kIsWeb) {
-      if (PrefsSvc.i.getString('lastOpenedChat') != null &&
-          showAltLayoutContextless &&
-          ChatsSvc.activeChat?.chat.guid != PrefsSvc.i.getString('lastOpenedChat') &&
-          !LifecycleSvc.isBubble) {
-        WidgetsBinding.instance.addPostFrameCallback((_) async {
-          if (kIsWeb) {
-            await ChatsSvc.loadedAllChats.future;
-          }
-          NavigationSvc.pushAndRemoveUntil(
-            context,
-            ConversationView(
-                chat: kIsWeb
-                    ? (await Chat.findOneWeb(guid: PrefsSvc.i.getString('lastOpenedChat')))!
-                    : Chat.findOne(guid: PrefsSvc.i.getString('lastOpenedChat'))!),
-            (route) => route.isFirst,
-          );
-        });
-      }
     }
   }
 

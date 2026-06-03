@@ -24,6 +24,7 @@ class TypingIndicatorRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final chat = ChatStateScope.chatOf(context);
     return Obx(() => Row(
+          key: controller.typingInfoKey,
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             if (controller.showTypingIndicator.value && SettingsSvc.settings.alwaysShowAvatars.value && iOS)
@@ -37,12 +38,9 @@ class TypingIndicatorRow extends StatelessWidget {
                   borderThickness: 0.1,
                 ),
               ),
-            Padding(
-              padding: const EdgeInsets.only(top: 5),
-              child: TypingIndicator(
-                controller: controller,
-              ),
-            ),
+            TypingIndicator(
+              controller: controller,
+            )
           ],
         ));
   }
@@ -120,7 +118,7 @@ class _NotifyAnywayButton extends StatelessWidget {
           style: context.theme.textTheme.labelLarge!.copyWith(color: context.theme.colorScheme.tertiaryContainer),
         ),
         onPressed: () async {
-          await HttpSvc.notify(latestMessage!.guid!);
+          await HttpSvc.message.notify(latestMessage!.guid!);
         },
       );
     }
@@ -143,64 +141,81 @@ class SmartRepliesRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Obx(() => AnimatedSize(
-          duration: const Duration(milliseconds: 400),
-          child: smartReplies.isNotEmpty || internalSmartReplies.isNotEmpty
-              ? Padding(
-                  padding: EdgeInsets.only(top: iOS ? 8.0 : 0.0, right: 5),
-                  child: SizedBox(
-                    height: context.theme.extension<BubbleText>()!.bubbleText.fontSize! + 35,
-                    child: ListView(
-                      scrollDirection: Axis.horizontal,
-                      reverse: true,
-                      children: smartReplies.map((suggestion) => _buildReplyWidget(context, suggestion)).toList()
-                        ..addAll(internalSmartReplies.values),
-                    ),
+    return Obx(() {
+      final bool visible = smartReplies.isNotEmpty || internalSmartReplies.isNotEmpty;
+      final double rowHeight = context.theme.extension<BubbleText>()!.bubbleText.fontSize! + 35;
+      final double topPadding = iOS ? 8.0 : 0.0;
+      final double totalHeight = visible ? rowHeight + topPadding : 0.0;
+
+      controller.updateSmartReplyLayout(visible: visible, height: totalHeight);
+
+      return AnimatedSize(
+        duration: const Duration(milliseconds: 400),
+        child: visible
+            ? Padding(
+                padding: EdgeInsets.only(top: topPadding, right: 5),
+                child: SizedBox(
+                  height: rowHeight,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    reverse: true,
+                    children: smartReplies.map((suggestion) => _buildReplyWidget(context, suggestion)).toList()
+                      ..addAll(internalSmartReplies.values),
                   ),
-                )
-              : const SizedBox.shrink(),
-        ));
+                ),
+              )
+            : const SizedBox.shrink(),
+      );
+    });
   }
 
-  Widget _buildReplyWidget(BuildContext context, String suggestion) => Container(
-        margin: const EdgeInsets.all(5),
-        decoration: BoxDecoration(
-          border: Border.all(
-            width: 2,
-            style: BorderStyle.solid,
-            color: context.theme.colorScheme.surfaceContainerHighest,
-          ),
-          borderRadius: BorderRadius.circular(19),
-        ),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(19),
-          onTap: () {
-            OutgoingMsgHandler.queue(OutgoingMessage(
-              chat: controller.chat,
-              message: Message(
-                text: suggestion,
-                dateCreated: DateTime.now(),
-                hasAttachments: false,
-                isFromMe: true,
-                handleId: 0,
+  Widget _buildReplyWidget(BuildContext context, String suggestion) {
+    final hasBackground = ChatsSvc.getChatState(controller.chat.guid)?.customBackgroundPath.value?.isNotEmpty == true;
+    return Container(
+      margin: const EdgeInsets.all(5),
+      decoration: hasBackground
+          ? BoxDecoration(
+              color: context.theme.colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(19),
+            )
+          : BoxDecoration(
+              border: Border.all(
+                width: 2,
+                style: BorderStyle.solid,
+                color: context.theme.colorScheme.surfaceContainerHighest,
               ),
-            ));
-          },
-          child: Center(
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 1.5, left: 13.0, right: 13.0),
-              child: RichText(
-                text: TextSpan(
-                  children: MessageHelper.buildEmojiText(
-                    suggestion,
-                    context.theme.extension<BubbleText>()!.bubbleText,
-                  ),
+              borderRadius: BorderRadius.circular(19),
+            ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(19),
+        onTap: () {
+          OutgoingMsgHandler.queue(OutgoingMessage(
+            chat: controller.chat,
+            message: Message(
+              text: suggestion,
+              dateCreated: DateTime.now(),
+              hasAttachments: false,
+              isFromMe: true,
+              handleId: 0,
+            ),
+          ));
+        },
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 1.5, left: 13.0, right: 13.0),
+            child: RichText(
+              text: TextSpan(
+                children: MessageHelper.buildEmojiText(
+                  suggestion,
+                  context.theme.extension<BubbleText>()!.bubbleText,
                 ),
               ),
             ),
           ),
         ),
-      );
+      ),
+    );
+  }
 }
 
 /// Extracted widget for scroll down button
@@ -271,11 +286,9 @@ class DragDropOverlay extends StatelessWidget {
   const DragDropOverlay({
     super.key,
     required this.dragging,
-    required this.numFiles,
   });
 
   final RxBool dragging;
-  final RxInt numFiles;
 
   @override
   Widget build(BuildContext context) {
@@ -294,7 +307,7 @@ class DragDropOverlay extends StatelessWidget {
                       size: 50,
                     ),
                     Text(
-                      "Attach ${numFiles.value} File${numFiles.value > 1 ? 's' : ''}",
+                      "Attach File(s)",
                       style: context.theme.textTheme.headlineLarge!.copyWith(color: context.theme.colorScheme.primary),
                     ),
                   ],

@@ -17,29 +17,30 @@ class TitleBarWrapper extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!kIsDesktop) {
-      return Obx(() => Stack(
-            children: <Widget>[
-              child,
-              if (SettingsSvc.settings.showConnectionIndicator.value) const ConnectionIndicator(),
-            ],
-          ));
+      return Stack(
+        children: <Widget>[
+          child,
+          const ConnectionIndicator(),
+        ],
+      );
     }
 
     return Obx(
-      () => (SettingsSvc.settings.useCustomTitleBar.value && Platform.isLinux) || (kIsDesktop && !Platform.isLinux)
+      () => (SettingsSvc.settings.titleBarStyle.value == BBTitleBarStyle.custom && Platform.isLinux) ||
+              (kIsDesktop && !Platform.isLinux)
           ? WindowBorder(
               color: Colors.transparent,
               width: 0,
               child: Stack(children: <Widget>[
                 child,
                 const TitleBar(),
-                if (SettingsSvc.settings.showConnectionIndicator.value) const ConnectionIndicator(),
+                const ConnectionIndicator(),
               ]),
             )
           : Stack(
               children: <Widget>[
                 child,
-                if (SettingsSvc.settings.showConnectionIndicator.value) const ConnectionIndicator(),
+                const ConnectionIndicator(),
               ],
             ),
     );

@@ -12,6 +12,7 @@ import 'package:get/get.dart';
 enum DetailsMenuAction {
   Reply,
   Save,
+  OpenInImageViewer,
   OpenInBrowser,
   OpenInNewTab,
   CopyText,
@@ -33,6 +34,7 @@ enum DetailsMenuAction {
   Bookmark,
   SelectMultiple,
   MessageInfo,
+  CancelSend,
 }
 
 class PlatformSupport {
@@ -47,6 +49,7 @@ class PlatformSupport {
 const Map<DetailsMenuAction, PlatformSupport> _actionPlatformSupport = {
   DetailsMenuAction.Reply: PlatformSupport(true, true, true, true),
   DetailsMenuAction.Save: PlatformSupport(true, true, true, true),
+  DetailsMenuAction.OpenInImageViewer: PlatformSupport(false, true, true, false),
   DetailsMenuAction.OpenInBrowser: PlatformSupport(true, false, false, false),
   DetailsMenuAction.OpenInNewTab: PlatformSupport(false, false, false, true),
   DetailsMenuAction.CopyText: PlatformSupport(true, true, true, true),
@@ -68,11 +71,13 @@ const Map<DetailsMenuAction, PlatformSupport> _actionPlatformSupport = {
   DetailsMenuAction.Bookmark: PlatformSupport(true, true, true, true),
   DetailsMenuAction.SelectMultiple: PlatformSupport(true, true, true, true),
   DetailsMenuAction.MessageInfo: PlatformSupport(true, true, true, true),
+  DetailsMenuAction.CancelSend: PlatformSupport(true, true, true, true),
 };
 
 const Map<DetailsMenuAction, (IconData, IconData)> _actionToIcon = {
   DetailsMenuAction.Reply: (CupertinoIcons.reply, Icons.reply),
   DetailsMenuAction.Save: (CupertinoIcons.cloud_download, Icons.file_download),
+  DetailsMenuAction.OpenInImageViewer: (CupertinoIcons.photo, Icons.image_outlined),
   DetailsMenuAction.OpenInBrowser: (CupertinoIcons.macwindow, Icons.open_in_browser),
   DetailsMenuAction.OpenInNewTab: (CupertinoIcons.macwindow, Icons.open_in_browser),
   DetailsMenuAction.CopyText: (CupertinoIcons.doc_on_clipboard, Icons.content_copy),
@@ -94,11 +99,13 @@ const Map<DetailsMenuAction, (IconData, IconData)> _actionToIcon = {
   DetailsMenuAction.Bookmark: (CupertinoIcons.bookmark, Icons.bookmark_outlined),
   DetailsMenuAction.SelectMultiple: (CupertinoIcons.checkmark_square, Icons.check_box_outlined),
   DetailsMenuAction.MessageInfo: (CupertinoIcons.info, Icons.info),
+  DetailsMenuAction.CancelSend: (CupertinoIcons.xmark_circle, Icons.cancel_outlined),
 };
 
 const Map<DetailsMenuAction, String> _actionToText = {
   DetailsMenuAction.Reply: "Reply",
   DetailsMenuAction.Save: "Save",
+  DetailsMenuAction.OpenInImageViewer: "Open In Image Viewer",
   DetailsMenuAction.OpenInBrowser: "Open In Browser",
   DetailsMenuAction.OpenInNewTab: "Open In New Tab",
   DetailsMenuAction.CopyText: "Copy",
@@ -120,6 +127,7 @@ const Map<DetailsMenuAction, String> _actionToText = {
   DetailsMenuAction.Bookmark: "Add/Remove Bookmark",
   DetailsMenuAction.SelectMultiple: "Select Multiple",
   DetailsMenuAction.MessageInfo: "Message Info",
+  DetailsMenuAction.CancelSend: "Cancel Send",
 };
 
 class _DetailsMenuActionUtils {
@@ -172,7 +180,7 @@ class CustomDetailsMenuActionWidget extends StatelessWidget {
       child: InkWell(
         onTap: isDisabled ? null : onTap,
         child: ListTile(
-          mouseCursor: SystemMouseCursors.click,
+          mouseCursor: MouseCursor.defer,
           dense: !kIsDesktop && !kIsWeb,
           title: Text(
             title,

@@ -1,9 +1,9 @@
 import 'dart:math';
 
+import 'package:bluebubbles/app/layouts/conversation_view/widgets/message/popup/widgets/reaction_details.dart';
 import 'package:bluebubbles/app/state/message_state.dart';
 import 'package:bluebubbles/app/state/chat_state_scope.dart';
 import 'package:bluebubbles/app/state/message_state_scope.dart';
-import 'package:bluebubbles/app/layouts/conversation_view/widgets/message/popup/message_popup.dart';
 import 'package:bluebubbles/app/layouts/conversation_view/widgets/message/reaction/reaction_clipper.dart';
 import 'package:bluebubbles/app/layouts/conversation_view/widgets/message/shared/message_error_helper.dart';
 import 'package:bluebubbles/helpers/helpers.dart';
@@ -130,29 +130,31 @@ class ReactionWidgetState extends State<ReactionWidget> with ThemeHelpers {
             child: GestureDetector(
               onTap: () {
                 if (reactions == null) return;
+                // Capture the conversation's theme before pushing \u2014 if adaptive
+                // theming is active, context.theme is already the per-chat theme.
+                final capturedTheme = context.theme;
+                final capturedIsM3 = ThemeSvc.isMaterialYouActive(context);
+                final capturedBubbleExt = capturedTheme.extensions[BubbleColors] as BubbleColors?;
                 Navigator.push(
                   context,
                   PageRouteBuilder(
                     transitionDuration: const Duration(milliseconds: 500),
-                    pageBuilder: (context, animation, secondaryAnimation) {
+                    pageBuilder: (routeCtx, animation, secondaryAnimation) {
                       return SlideTransition(
                         position: Tween<Offset>(
                           begin: const Offset(0.0, 1.0),
                           end: Offset.zero,
                         ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOut)),
                         child: Theme(
-                          data: context.theme.copyWith(
+                          data: capturedTheme.copyWith(
                             // in case some components still use legacy theming
-                            primaryColor: context.theme.colorScheme.bubble(context, true),
-                            colorScheme: context.theme.colorScheme.copyWith(
-                              primary: context.theme.colorScheme.bubble(context, true),
-                              onPrimary: context.theme.colorScheme.onBubble(context, true),
-                              surface: SettingsSvc.settings.monetTheming.value == Monet.full
-                                  ? null
-                                  : (context.theme.extensions[BubbleColors] as BubbleColors?)?.receivedBubbleColor,
-                              onSurface: SettingsSvc.settings.monetTheming.value == Monet.full
-                                  ? null
-                                  : (context.theme.extensions[BubbleColors] as BubbleColors?)?.onReceivedBubbleColor,
+                            primaryColor: capturedBubbleExt?.iMessageBubbleColor ?? capturedTheme.colorScheme.primary,
+                            colorScheme: capturedTheme.colorScheme.copyWith(
+                              primary: capturedBubbleExt?.iMessageBubbleColor ?? capturedTheme.colorScheme.primary,
+                              onPrimary:
+                                  capturedBubbleExt?.oniMessageBubbleColor ?? capturedTheme.colorScheme.onPrimary,
+                              surface: capturedIsM3 ? null : capturedBubbleExt?.receivedBubbleColor,
+                              onSurface: capturedIsM3 ? null : capturedBubbleExt?.onReceivedBubbleColor,
                             ),
                           ),
                           child: Stack(
@@ -160,7 +162,7 @@ class ReactionWidgetState extends State<ReactionWidget> with ThemeHelpers {
                             children: [
                               GestureDetector(
                                 onTap: () {
-                                  Navigator.of(context).pop();
+                                  Navigator.of(routeCtx).pop();
                                 },
                               ),
                               Positioned(

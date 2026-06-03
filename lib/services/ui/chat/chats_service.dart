@@ -117,8 +117,8 @@ class ChatsService {
       if (addr.isEmpty) continue;
       // Only count chats that have at least one real message.  The dummy
       // fallback message returned by dbLatestMessage uses epoch as the date.
-      final lm = chatStates[c.guid]?.latestMessage.value ?? c.latestMessage;
-      final ts = lm.dateCreated?.millisecondsSinceEpoch ?? 0;
+      final lm = chatStates[c.guid]?.latestMessage.value ?? c.dbLatestMessage.target;
+      final ts = lm?.dateCreated?.millisecondsSinceEpoch ?? 0;
       if (ts > 0) addrs.add(addr);
     }
     _cachedDmAddressesWithMessages = addrs;
@@ -140,8 +140,8 @@ class ChatsService {
     if (activeChat?.chat.guid == c.guid) return false;
     final addr = c.handles.first.address.trim().toLowerCase();
     if (addr.isEmpty) return false;
-    final lm = chatStates[c.guid]?.latestMessage.value ?? c.latestMessage;
-    final ts = lm.dateCreated?.millisecondsSinceEpoch ?? 0;
+    final lm = chatStates[c.guid]?.latestMessage.value ?? c.dbLatestMessage.target;
+    final ts = lm?.dateCreated?.millisecondsSinceEpoch ?? 0;
     // Has its own messages → keep it
     if (ts > 0) return false;
     // Empty, but no other DM for the same address → keep it (user expects to see something)
@@ -241,11 +241,9 @@ class ChatsService {
         final newCount = event.count();
         if (newCount > currentCount && currentCount != 0) {
           final chat = event.findFirst()!;
-          if (chat.latestMessage.dateCreated!.millisecondsSinceEpoch == 0) {
+          if (chat.dbOnlyLatestMessageDate == null || chat.dbOnlyLatestMessageDate!.millisecondsSinceEpoch == 0) {
             // wait for the chat.addMessage to go through
             await Future.delayed(const Duration(milliseconds: 500));
-            // refresh the latest message
-            chat.dbLatestMessage;
           }
           await addChat(chat, immediate: true);
         }
@@ -268,7 +266,7 @@ class ChatsService {
 
     // Get current count from database or server
     currentCount = getChatCount() ??
-        (await HttpSvc.chatCount().catchError((err) {
+        (await HttpSvc.chat.getCount().catchError((err) {
           Logger.info("Error when fetching chat count!", tag: "ChatBloc");
           return Response(requestOptions: RequestOptions(path: ''));
         }))
@@ -475,7 +473,7 @@ class ChatsService {
   /// The UI notification is deferred to the next frame so this is safe to call
   /// from [State.dispose] (while the widget tree may still be locked).
   void refreshSortOrder() {
-    _sortedChats.sort(Chat.sort);
+    _sortedChats.sort(_sortCompare);
     SchedulerBinding.instance.addPostFrameCallback((_) {
       _scheduleListVersionUpdate(immediate: true);
     });
@@ -497,6 +495,41 @@ class ChatsService {
     return _sortedChats;
   }
 
+  /// State-aware sort comparison used by [_findInsertionIndex] and [refreshSortOrder].
+  ///
+  /// Mirrors [Chat.sort] for pin-index ordering but resolves the latest-message
+  /// date from [chatStates] instead of [Chat.dbOnlyLatestMessageDate].  Using the
+  /// reactive state avoids a race condition where the DB write for the new message
+  /// has not yet completed when the chat list needs to be repositioned.
+  int _sortCompare(Chat a, Chat b) {
+    final aIsPinned = a.isPinned ?? false;
+    final bIsPinned = b.isPinned ?? false;
+
+    // Both pinned with an explicit order → sort by pinIndex.
+    if (aIsPinned && bIsPinned && a.pinIndex != null && b.pinIndex != null) {
+      return a.pinIndex!.compareTo(b.pinIndex!);
+    }
+
+    // b is ordered-pinned, a is not → b comes first.
+    if (bIsPinned && b.pinIndex != null && (!aIsPinned || a.pinIndex == null)) return 1;
+    // a is ordered-pinned, b is not → a comes first.
+    if (aIsPinned && a.pinIndex != null && (!bIsPinned || b.pinIndex == null)) return -1;
+
+    // One pinned, one not.
+    if (!aIsPinned && bIsPinned) return 1;
+    if (aIsPinned && !bIsPinned) return -1;
+
+    // Both unpinned (or both pinned without an index): sort by most-recent message.
+    // Use ChatState latestMessage date to avoid the DB-write race condition.
+    final aDate = chatStates[a.guid]?.latestMessage.value?.dateCreated ??
+        a.dbOnlyLatestMessageDate ??
+        DateTime.fromMillisecondsSinceEpoch(0);
+    final bDate = chatStates[b.guid]?.latestMessage.value?.dateCreated ??
+        b.dbOnlyLatestMessageDate ??
+        DateTime.fromMillisecondsSinceEpoch(0);
+    return -aDate.compareTo(bDate);
+  }
+
   /// Find the correct insertion index for a chat using binary search
   /// Returns the index where the chat should be inserted to maintain sort order
   int _findInsertionIndex(Chat chat) {
@@ -506,7 +539,7 @@ class ChatsService {
     while (left < right) {
       final mid = (left + right) ~/ 2;
       final midChat = _sortedChats[mid];
-      final comparison = Chat.sort(chat, midChat);
+      final comparison = _sortCompare(chat, midChat);
 
       if (comparison < 0) {
         right = mid;
@@ -561,11 +594,13 @@ class ChatsService {
       final currentIsPinned = state.isPinned.value;
 
       // Check if sort-order-relevant fields have changed
-      final latestMessageChanged = updated.latestMessage.guid != currentLatestMessage?.guid ||
-          updated.latestMessage.dateCreated != currentLatestMessage?.dateCreated;
+      final latestMessageChanged = updated.dbLatestMessage.target?.guid != currentLatestMessage?.guid ||
+          updated.dbOnlyLatestMessageDate != currentLatestMessage?.dateCreated;
+      final latestMessageTimestampChanged = updated.dbOnlyLatestMessageDate != currentLatestMessage?.dateCreated;
       final pinIndexChanged = updated.pinIndex != currentPinIndex;
       final isPinnedChanged = (updated.isPinned ?? false) != currentIsPinned;
-      final sortOrderChanged = latestMessageChanged || pinIndexChanged || isPinnedChanged;
+      final sortOrderChanged =
+          latestMessageChanged || latestMessageTimestampChanged || pinIndexChanged || isPinnedChanged;
 
       if (updated != state.chat || override) {
         state.updateFromChat(updated);
@@ -615,10 +650,14 @@ class ChatsService {
     final _chats = Database.chats.query(Chat_.hasUnreadMessage.equals(true)).build().find();
     for (Chat c in _chats) {
       c.hasUnreadMessage = false;
-      MethodChannelSvc.invokeMethod(
-          "delete-notification", {"notification_id": c.id, "tag": NotificationsService.NEW_MESSAGE_TAG});
+      if (c.id != null) {
+        MethodChannelSvc.actions.deleteNotification(
+          notificationId: c.id!,
+          tag: NotificationsService.NEW_MESSAGE_TAG,
+        );
+      }
       if (SettingsSvc.settings.enablePrivateAPI.value && SettingsSvc.settings.privateMarkChatAsRead.value) {
-        HttpSvc.markChatRead(c.guid);
+        HttpSvc.chat.markRead(c.guid);
       }
 
       // Update chat state if it exists
@@ -681,11 +720,11 @@ class ChatsService {
         final chatList = getSortedChats();
         final chatSnapshot = chatList.where((e) => !isNullOrEmpty(e.displayName ?? e.chatIdentifier)).take(4).toList();
         for (Chat c in chatSnapshot) {
-          await MethodChannelSvc.invokeMethod("push-share-targets", {
-            "title": c.getTitle(),
-            "guid": c.guid,
-            "icon": await avatarAsBytes(chat: c, quality: 256),
-          });
+          await MethodChannelSvc.actions.pushShareTarget(
+            title: c.getTitle(),
+            guid: c.guid,
+            icon: await avatarAsBytes(chat: c, quality: 256),
+          );
         }
       });
     }
@@ -699,7 +738,7 @@ class ChatsService {
     if (withParticipants) withQuery.add("participants");
     if (withLastMessage) withQuery.add("lastmessage");
 
-    final response = await HttpSvc.singleChat(chatGuid, withQuery: withQuery.join(",")).catchError((err, stack) {
+    final response = await HttpSvc.chat.fetchOne(chatGuid, withQuery: withQuery.join(",")).catchError((err, stack) {
       Logger.error("Failed to fetch chat metadata!", error: err, trace: stack, tag: "Fetch-Chat");
       return Response(requestOptions: RequestOptions(path: ''));
     });
@@ -724,8 +763,8 @@ class ChatsService {
     if (withParticipants) withQuery.add("participants");
     if (withLastMessage) withQuery.add("lastmessage");
 
-    final response = await HttpSvc.chats(
-            withQuery: withQuery, offset: offset, limit: limit, sort: withLastMessage ? "lastmessage" : null)
+    final response = await HttpSvc.chat
+        .query(withQuery: withQuery, offset: offset, limit: limit, sort: withLastMessage ? "lastmessage" : null)
         .catchError((err, stack) {
       Logger.error("Failed to fetch chats!", error: err, trace: stack, tag: "Fetch-Chat");
       return Response(requestOptions: RequestOptions(path: ''));
@@ -758,7 +797,8 @@ class ChatsService {
     if (withAttachment) withQuery.add("attachment");
     if (withHandle) withQuery.add("handle");
 
-    HttpSvc.chatMessages(guid,
+    HttpSvc.chat
+        .getMessages(guid,
             withQuery: withQuery.join(","), offset: offset, limit: limit, sort: sort, after: after, before: before)
         .then((response) {
       if (!completer.isCompleted) completer.complete(response.data["data"]);
@@ -778,8 +818,8 @@ class ChatsService {
   // ========== Chat Lifecycle Management Methods (migrated from ChatManager) ==========
 
   /// Set all chats to inactive synchronously
-  void setAllInactiveSync({bool save = true, bool clearActive = true}) {
-    Logger.debug('Setting chats to inactive (save: $save, clearActive: $clearActive)');
+  void _setAllInactiveSync({bool clearActive = true}) {
+    Logger.debug('Setting chats to inactive (clearActive: $clearActive)');
 
     String? skip;
     if (clearActive) {
@@ -794,28 +834,22 @@ class ChatsService {
       state.updateActiveInternal(false);
       state.updateAliveInternal(false);
     });
-
-    if (save) {
-      EventDispatcherSvc.emit("update-highlight", null);
-      Future(() async => await PrefsSvc.i.remove('lastOpenedChat'));
-    }
   }
 
-  /// Set all chats to inactive asynchronously
-  Future<void> setAllInactive() async {
+  /// Set all chats to inactive
+  void setAllInactive() async {
     Logger.debug('Setting all chats to inactive');
-    await PrefsSvc.i.remove('lastOpenedChat');
-    setAllInactiveSync(save: false);
+    _setAllInactiveSync();
   }
 
   /// Set a chat as the active chat
-  Future<void> setActiveChat(Chat chat, {bool clearNotifications = true}) async {
-    await PrefsSvc.i.setString('lastOpenedChat', chat.guid);
-    setActiveChatSync(chat, clearNotifications: clearNotifications, save: false);
+  void setActiveChat(Chat chat, {bool clearNotifications = true}) async {
+    _setActiveChatSync(chat, clearNotifications: clearNotifications);
   }
 
-  /// Set a chat as the active chat synchronously
-  void setActiveChatSync(Chat chat, {bool clearNotifications = true, bool save = true}) {
+  /// Set a chat as the active chat synchronously.
+  /// This does NOT save the last opened chat to preferences
+  void _setActiveChatSync(Chat chat, {bool clearNotifications = true}) {
     EventDispatcherSvc.emit("update-highlight", chat.guid);
     Logger.debug('Setting active chat to ${chat.guid} (${chat.displayName})');
 
@@ -827,17 +861,13 @@ class ChatsService {
       chatState.updateActiveAndAliveInternal(true);
 
       // Clear all other chats to inactive
-      setAllInactiveSync(save: false, clearActive: false);
+      _setAllInactiveSync(clearActive: false);
 
       if (clearNotifications) {
         // Defer the observable update to avoid updating during build phase
         Future.microtask(() {
           setChatHasUnread(chatState.chat, false, force: true);
         });
-      }
-
-      if (save) {
-        Future(() async => await PrefsSvc.i.setString('lastOpenedChat', chat.guid));
       }
     }
   }
@@ -883,7 +913,7 @@ class ChatsService {
     // Handle active chat cleanup
     if (activeChat?.chat.guid == chat.guid) {
       NavigationSvc.closeAllConversationView(Get.context!);
-      await setAllInactive();
+      setAllInactive();
       await Future.delayed(const Duration(milliseconds: 500));
     }
 
@@ -916,7 +946,7 @@ class ChatsService {
     // Handle active chat cleanup
     if (activeChat?.chat.guid == chat.guid) {
       NavigationSvc.closeAllConversationView(Get.context!);
-      await setAllInactive();
+      setAllInactive();
       await Future.delayed(const Duration(milliseconds: 500));
     }
 
@@ -1222,6 +1252,12 @@ class ChatsService {
 
     if (state != null && state.customBackgroundPath.value == value) return;
 
+    // Invalidate the adaptive theme cache for the old background path.
+    final oldPath = state?.customBackgroundPath.value ?? chat.customBackgroundPath;
+    if (oldPath != null && oldPath != value) {
+      ThemesService.clearAdaptiveThemeCache(oldPath);
+    }
+
     // Update Chat model (use state.chat if available, otherwise use passed in chat)
     final chatToUpdate = state?.chat ?? chat;
     chatToUpdate.customBackgroundPath = value;
@@ -1231,22 +1267,60 @@ class ChatsService {
     state?.updateCustomBackgroundPathInternal(value);
   }
 
-  /// Set chat latest message
-  Future<void> setChatLatestMessage(Chat chat, Message? value) async {
+  /// Enable or disable the adaptive chat theme for a specific chat
+  Future<void> setAdaptiveThemeEnabled(Chat chat, bool value) async {
     final state = getChatState(chat.guid);
 
-    if (state != null && state.latestMessage.value?.guid == value?.guid) return;
+    if (state != null && state.adaptiveThemeEnabled.value == value) return;
+
+    final chatToUpdate = state?.chat ?? chat;
+    chatToUpdate.adaptiveThemeEnabled = value;
+    await chatToUpdate.saveAsync(updateAdaptiveTheme: true);
+
+    state?.updateAdaptiveThemeEnabledInternal(value);
+  }
+
+  /// Set the light mode adaptive theme variant for a specific chat
+  Future<void> setAdaptiveThemeVariantLight(Chat chat, String? variant) async {
+    final state = getChatState(chat.guid);
+
+    if (state != null && state.adaptiveThemeVariantLight.value == variant) return;
+
+    final chatToUpdate = state?.chat ?? chat;
+    chatToUpdate.adaptiveThemeVariantLight = variant;
+    await chatToUpdate.saveAsync(updateAdaptiveTheme: true);
+
+    state?.updateAdaptiveThemeVariantLightInternal(variant);
+  }
+
+  /// Set the dark mode adaptive theme variant for a specific chat
+  Future<void> setAdaptiveThemeVariantDark(Chat chat, String? variant) async {
+    final state = getChatState(chat.guid);
+
+    if (state != null && state.adaptiveThemeVariantDark.value == variant) return;
+
+    final chatToUpdate = state?.chat ?? chat;
+    chatToUpdate.adaptiveThemeVariantDark = variant;
+    await chatToUpdate.saveAsync(updateAdaptiveTheme: true);
+
+    state?.updateAdaptiveThemeVariantDarkInternal(variant);
+  }
+
+  /// Set chat latest message
+  Future<void> setChatLatestMessage(Chat chat, Message value) async {
+    final state = getChatState(chat.guid);
+    if (state == null) return;
 
     // Update Chat model (use state.chat if available, otherwise use passed in chat)
-    final chatToUpdate = state?.chat ?? chat;
-    chatToUpdate.latestMessage = value ??
-        Message(
-          dateCreated: DateTime.fromMillisecondsSinceEpoch(0),
-          guid: chatToUpdate.guid,
-        );
+    final chatToUpdate = state.chat;
+
+    // Only save in the DB if it's not already the same latest message.
+    if (state.latestMessage.value?.guid != value.guid) {
+      chatToUpdate.setLatestMessage(value);
+    }
 
     // Update state if available
-    state?.updateLatestMessageInternal(value);
+    state.updateLatestMessageInternal(value);
   }
 
   /// Update chat latest message and subtitle in response to a new or updated message.
@@ -1262,7 +1336,7 @@ class ChatsService {
     final hideMessageContent = redacted && SettingsSvc.settings.hideMessageContent.value;
     state.updateSubtitleInternal(
         message.getNotificationText(hideContactInfo: hideContactInfo, hideMessageContent: hideMessageContent));
-    state.chat.latestMessage = message;
+    state.chat.setLatestMessage(message);
     _repositionChat(state.chat, immediate: true);
   }
 

@@ -12,7 +12,7 @@ description: Send iMessages on Android using BlueBubbles!
 # Read more about iOS versioning at
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 
-version: 2.0.0+80
+version: 2.0.0+84
 publish_to: none
 
 environment:
@@ -34,11 +34,16 @@ dependencies:
   chunked_stream: ^1.4.2
   collection: ^1.19.0
   confetti: ^0.8.0
-  connectivity_plus: ^7.0.0
+  connectivity_plus:
+    git:
+      url: https://github.com/edde746/plus_plugins
+      ref: 2b614414ce95d920880765d07cbb9759699a4563
+      path: packages/connectivity_plus/connectivity_plus
   crop_your_image: ^2.0.0
   csslib: ^1.0.2
   cupertino_icons: ^1.0.8
   defer_pointer: ^0.0.2
+  desktop_drop: ^0.7.1
   desktop_webview_auth:
     git:
       url: https://github.com/BlueBubblesApp/flutter_desktop_webview_auth.git
@@ -82,11 +87,12 @@ dependencies:
   flutter_staggered_grid_view: ^0.7.0
   flutter_svg: ^2.2.0
   flutter_timezone: ^5.0.2
+  fluttertoast: ^8.2.14
   geolocator: ^14.0.2
   gesture_x_detector: # support touchscreens properly
     git:
       url: https://github.com/BlueBubblesApp/xgesture_flutter.git
-      ref: 7de6e023ff68f67af1d83f7c1303d8b973f84944
+      ref: d63342cb17976f60bd94e7c1a822398115d3f83c
   get: ^4.7.2
   github: ^9.25.0
   google_fonts: ^8.0.2
@@ -96,11 +102,10 @@ dependencies:
   hand_signature: ^3.1.0+2
   idb_shim: ^2.6.1+7
   image: ^4.5.4
-  camera: ^0.12.0+1
   image_picker: ^1.2.0
   image_size_getter: ^2.4.1
   in_app_review: ^2.0.11
-  internet_connection_checker_plus: ^2.9.1
+  internet_connection_checker_plus: ^3.0.0
   languagetool_textfield: ^0.1.1
   launch_at_startup: ^0.5.1
   local_auth: ^3.0.1
@@ -159,7 +164,6 @@ dependencies:
   store_checker: ^1.8.0
   synchronized: ^3.3.0+3
   system_tray: ^2.0.3
-  super_drag_and_drop: ^0.9.1
   supercharged: ^2.1.1
   system_info2: ^4.0.0
   tenor_flutter: ^1.0.3 # Pinned because of flutter SDK
@@ -193,10 +197,10 @@ dependencies:
   uuid: any
 dependency_overrides:
   clock: ^1.1.2 # encrypter_plus
-  flutter_map: # Windows trackpad bug
+  flutter_map: # https://github.com/fleaflet/flutter_map/issues/2152
     git:
-      url: https://github.com/BlueBubblesApp/flutter_map.git
-      ref: 67cca68e9f6db59649af56b6454e5f58efcedbbe
+      url: https://github.com/fleaflet/flutter_map.git
+      ref: 51a3f84e08d3ce4c6393a572bd4ca4bcc472753d
   http: ^1.3.0 # firebase_dart
   intl: ^0.20.2 # firebase_dart
   meta: ^1.16.0 # flutter_markdown_plus
@@ -205,7 +209,7 @@ dependency_overrides:
   permission_handler_windows: # https://github.com/Baseflow/flutter-permission-handler/issues/983
     git:
       url: https://github.com/BlueBubblesApp/flutter-permission-handler.git
-      ref: 251a9475644f64784efedff4b3a8bd5c99d3884d
+      ref: 25fb3eb83e24f191a0021c34dfbe4c13c4af3c8a
       path: permission_handler_windows
   pointycastle: ^4.0.0 # firebase_dart
   rxdart: ^0.28.0 # firebase_dart
@@ -322,7 +326,7 @@ msix_config:
   display_name: BlueBubbles
   publisher_display_name: BlueBubbles
   identity_name: 23344BlueBubbles.BlueBubbles
-  msix_version: 1.15.100.0
+  msix_version: 1.15.101.0
   publisher: CN=BEC9154D-191E-4375-BF30-698BD4C141C4
   vs_generated_images_folder_path: windows/icons
   logo_path: assets/icon/icon.ico
