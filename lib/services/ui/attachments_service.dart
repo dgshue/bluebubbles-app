@@ -554,6 +554,22 @@ class AttachmentsService extends GetxService {
         return filePath;
       }
 
+      // Desktop (Windows/Linux): FlutterImageCompress has no implementation on
+      // these platforms, and the pure-Dart `image` package (used by the TIFF
+      // branch above) cannot decode HEIC — so there is no local conversion path.
+      // Calling FlutterImageCompress here would throw MissingPluginException on
+      // every HEIC. Instead, rely on the server-converted download: the in-bubble
+      // download requests `original=false`, which the macOS server returns as a
+      // display-friendly JPEG. Flutter's Image widget decodes by byte content,
+      // not file extension, so that file renders even though it keeps its .heic
+      // name. If the server did not convert it (e.g. conversion disabled), the
+      // ImageViewer's errorBuilder shows a graceful "Failed to display image"
+      // placeholder rather than crashing. This mirrors the pre-2.0 behavior,
+      // which gated the local conversion with `!kIsDesktop`.
+      if (kIsDesktop) {
+        return filePath;
+      }
+
       // Android: Check API level (28+ has native support)
       // For now, convert all Android to be safe for older devices
       try {
