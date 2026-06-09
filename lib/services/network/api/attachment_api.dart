@@ -42,8 +42,15 @@ class AttachmentApi {
         onReceiveProgress: onReceiveProgress,
       );
 
-      // If savePath provided, write stream directly to file
-      if (savePath != null && response.data != null) {
+      // If savePath provided, write stream directly to file.
+      //
+      // Only stream to disk when the request actually succeeded AND the body is
+      // a stream. On a non-200 the ApiInterceptor resolves the error into a
+      // Response whose `.data` is a Map (not a ResponseBody), so reading
+      // `response.data.stream` here would throw a NoSuchMethodError and mask the
+      // real status code (e.g. a server 500 on a HEIC attachment). Falling
+      // through to returnSuccessOrError() instead propagates the true error.
+      if (savePath != null && response.statusCode == 200 && response.data is ResponseBody) {
         final file = File(savePath);
         await file.parent.create(recursive: true);
 
